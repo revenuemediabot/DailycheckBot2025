@@ -200,45 +200,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # Основная функция
+# Добавьте в начало функции main() (после логирования):
+
 def main():
     logger.info("🚀 Запуск DailyCheck Bot v4.0...")
     logger.info(f"Python: {sys.version}")
     logger.info(f"Платформа: {sys.platform}")
     
+    # Добавьте эту паузу для избежания конфликтов
+    import time
+    logger.info("⏳ Ожидание завершения предыдущих экземпляров...")
+    time.sleep(10)  # 10 секунд пауза
+    
     try:
         # Запуск HTTP сервера
         start_health_server()
         
-        # Создание Telegram приложения
+        # Создание Telegram приложения с дополнительными параметрами
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
-        # Регистрация обработчиков
-        app.add_handler(CommandHandler("start", start_command))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("ping", ping_command))
-        app.add_handler(CommandHandler("ai", ai_command))
+        # ... остальной код без изменений ...
         
-        # AI чат для обычных сообщений
-        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        
-        logger.info("✅ Обработчики зарегистрированы")
-        logger.info("📱 Найдите бота в Telegram и отправьте /start")
         logger.info("🎯 Запуск polling...")
         
-        # Запуск бота
-        app.run_polling(drop_pending_updates=True)
+        # Запуск с повторными попытками
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                app.run_polling(drop_pending_updates=True)
+                break  # Успешный запуск
+            except Exception as e:
+                if "Conflict" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Конфликт (попытка {attempt + 1}/{max_retries}), повторная попытка через 15 сек...")
+                    time.sleep(15)
+                else:
+                    raise
         
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("👋 Остановка по Ctrl+C")
-    except Exception as e:
-        logger.error(f"Фатальная ошибка: {e}")
         sys.exit(1)
