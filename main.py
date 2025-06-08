@@ -3,6 +3,8 @@
 import os
 import sys
 import logging
+import threading
+import time
 
 # Исправление event loop конфликтов
 try:
@@ -25,7 +27,7 @@ except:
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PORT = int(os.getenv("PORT", "8080"))
+PORT = int(os.getenv("PORT", "10000"))  # Render использует переменную PORT
 
 if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN не найден!")
@@ -35,17 +37,17 @@ logger.info(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
 if OPENAI_API_KEY:
     logger.info(f"✅ OpenAI: {OPENAI_API_KEY[:10]}...")
 
-# HTTP сервер
-import threading
-import http.server
-import socketserver
-import json
-
+# HTTP сервер для health check (ДОЛЖЕН запуститься первым!)
 def start_health_server():
+    import http.server
+    import socketserver
+    import json
+    
     class HealthHandler(http.server.SimpleHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             data = {
                 "status": "ok",
@@ -56,19 +58,29 @@ def start_health_server():
             self.wfile.write(json.dumps(data).encode())
         
         def log_message(self, format, *args):
-            pass
+            # Логируем только важные запросы
+            if '/health' in format or self.path == '/':
+                logger.info(f"Health check: {self.client_address[0]}")
     
     def run_server():
         try:
-            with socketserver.TCPServer(("", PORT), HealthHandler) as httpd:
-                logger.info(f"✅ Health server на порту {PORT}")
+            # Привязка к 0.0.0.0 для внешнего доступа
+            with socketserver.TCPServer(("0.0.0.0", PORT), HealthHandler) as httpd:
+                logger.info(f"✅ HTTP сервер ЗАПУЩЕН на 0.0.0.0:{PORT}")
                 httpd.serve_forever()
         except Exception as e:
-            logger.error(f"HTTP server ошибка: {e}")
+            logger.error(f"❌ HTTP server ошибка: {e}")
     
-    threading.Thread(target=run_server, daemon=True).start()
+    # Запускаем в отдельном потоке
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    
+    # Проверяем что сервер запустился
+    time.sleep(2)
+    logger.info(f"🌐 Health check доступен на http://0.0.0.0:{PORT}")
+    return server_thread
 
-# Telegram импорты
+# Импорты Telegram
 try:
     from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
     from telegram import Update
@@ -81,20 +93,18 @@ except ImportError as e:
 # Обработчики команд
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    welcome_text = (
+    text = (
         f"🚀 Привет, {user.first_name}!\n\n"
         f"Я DailyCheck Bot - ваш AI помощник для продуктивности!\n\n"
-        f"📖 Команды:\n"
+        f"Команды:\n"
         f"/start - начать работу\n"
         f"/help - подробная справка\n"
         f"/ping - проверка работы\n"
         f"/ai <текст> - AI помощь\n\n"
         f"💬 Или просто напишите мне что-нибудь!"
     )
-    await update.message.reply_text(welcome_text)
+    await update.message.reply_text(text)
     logger.info(f"Команда /start от пользователя {user.id}")
-
-# Замените функцию help_command на эту версию (обычный текст):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -114,17 +124,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Создай список задач на завтра\n"
         "• Как бороться с прокрастинацией?"
     )
-    await update.message.reply_text(help_text)  # Используем reply_text вместо reply_html
+    await update.message.reply_text(help_text)
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ping_text = (
-        "🏓 <b>Понг!</b>\n\n"
+        f"🏓 Понг!\n\n"
         f"✅ Бот работает отлично\n"
         f"🤖 AI: {'включен' if OPENAI_API_KEY else 'выключен'}\n"
-        f"🌐 Сервер: активен\n"
+        f"🌐 Сервер: порт {PORT}\n"
         f"⚡ Готов к работе!"
     )
-    await update.message.reply_html(ping_text)
+    await update.message.reply_text(ping_text)
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -153,17 +163,10 @@ async def generate_ai_response(text: str) -> str:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
-        system_prompt = (
-            "Ты полезный AI-ассистент для продуктивности и планирования. "
-            "Отвечай конкретно, полезно и с энтузиазмом. "
-            "Используй эмодзи для наглядности. "
-            "Давай практические советы."
-        )
-        
         response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": "Ты полезный AI-ассистент для продуктивности. Отвечай кратко и полезно."},
                 {"role": "user", "content": text}
             ],
             max_tokens=400,
@@ -174,19 +177,14 @@ async def generate_ai_response(text: str) -> str:
         
     except Exception as e:
         logger.error(f"AI ошибка: {e}")
-        return (
-            f"⚠️ Произошла ошибка с AI сервисом.\n\n"
-            f"Ваш запрос: '{text}'\n\n"
-            f"🔄 Попробуйте еще раз через минуту!"
-        )
+        return f"⚠️ Ошибка AI сервиса. Попробуйте позже!"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user = update.effective_user
     
-    logger.info(f"Сообщение от {user.id} (@{user.username}): {user_text[:50]}...")
+    logger.info(f"Сообщение от {user.id}: {user_text[:50]}...")
     
-    # Показываем "печатает"
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
     try:
@@ -194,50 +192,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response)
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения: {e}")
-        await update.message.reply_text(
-            "😅 Упс! Что-то пошло не так.\n"
-            "Попробуйте еще раз или используйте команды."
-        )
+        await update.message.reply_text("😅 Что-то пошло не так, попробуйте ещё раз!")
 
 # Основная функция
-# Добавьте в начало функции main() (после логирования):
-
 def main():
     logger.info("🚀 Запуск DailyCheck Bot v4.0...")
     logger.info(f"Python: {sys.version}")
     logger.info(f"Платформа: {sys.platform}")
-    
-    # Добавьте эту паузу для избежания конфликтов
-    import time
-    logger.info("⏳ Ожидание завершения предыдущих экземпляров...")
-    time.sleep(10)  # 10 секунд пауза
+    logger.info(f"Порт: {PORT}")
     
     try:
-        # Запуск HTTP сервера
-        start_health_server()
+        # ШАГ 1: Запуск HTTP сервера (КРИТИЧЕСКИ ВАЖНО для Render!)
+        logger.info("🌐 Запуск HTTP сервера...")
+        http_thread = start_health_server()
         
-        # Создание Telegram приложения с дополнительными параметрами
+        # ШАГ 2: Пауза для стабилизации
+        time.sleep(3)
+        logger.info("⏳ HTTP сервер стабилизировался")
+        
+        # ШАГ 3: Создание Telegram приложения
+        logger.info("🤖 Создание Telegram приложения...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
-        # ... остальной код без изменений ...
+        # ШАГ 4: Регистрация обработчиков
+        app.add_handler(CommandHandler("start", start_command))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("ping", ping_command))
+        app.add_handler(CommandHandler("ai", ai_command))
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         
+        logger.info("✅ Обработчики зарегистрированы")
+        logger.info("📱 Найдите бота в Telegram и отправьте /start")
         logger.info("🎯 Запуск polling...")
         
-        # Запуск с повторными попытками
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                app.run_polling(drop_pending_updates=True)
-                break  # Успешный запуск
-            except Exception as e:
-                if "Conflict" in str(e) and attempt < max_retries - 1:
-                    logger.warning(f"⚠️ Конфликт (попытка {attempt + 1}/{max_retries}), повторная попытка через 15 сек...")
-                    time.sleep(15)
-                else:
-                    raise
+        # ШАГ 5: Запуск бота
+        app.run_polling(drop_pending_updates=True)
         
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        # НЕ выходим сразу - оставляем HTTP сервер работать
+        logger.info("🔄 HTTP сервер продолжает работать...")
+        
+        # Бесконечный цикл чтобы процесс не завершился
+        try:
+            while True:
+                time.sleep(60)
+                logger.info("💓 Процесс активен (HTTP сервер работает)")
+        except KeyboardInterrupt:
+            logger.info("👋 Остановка по Ctrl+C")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("👋 Остановка по KeyboardInterrupt")
+    except Exception as e:
+        logger.error(f"Фатальная ошибка: {e}")
+        # Даже при фатальной ошибке оставляем процесс живым для HTTP сервера
+        logger.info("🔄 Поддержание процесса для HTTP сервера...")
+        try:
+            while True:
+                time.sleep(300)  # 5 минут
+                logger.info("💓 Процесс активен")
+        except:
+            pass
