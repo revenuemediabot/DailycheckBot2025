@@ -1,7 +1,7 @@
 # handlers/commands/basic.py
 
-from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -14,16 +14,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "🛠 <b>Доступные команды</b>:\n"
-        "/start — перезапустить бота\n"
+        "/start — главное меню\n"
         "/help — справка\n"
-        "/tasks — список задач\n"
-        "/addtask — добавить задачу\n"
-        # ...другие команды, по необходимости
+        "/myid — узнать свой Telegram ID\n"
+        "/tasks — задачи\n"
+        "/habits — привычки\n"
+        "/mood — настроение\n"
+        "/focus — фокус-режим\n"
+        "/ai_chat — AI-чат\n"
+        "/motivate — мотивация\n"
+        "/stats — статистика\n"
+        "/settings — настройки\n"
+        "/export — экспорт данных\n"
+        "— и многое другое!"
     )
     await update.message.reply_html(help_text)
 
+async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await update.message.reply_text(
+        f"Ваш Telegram ID: <code>{user.id}</code>", parse_mode="HTML"
+    )
+
 def register_basic_handlers(application: Application):
-    """Регистрирует базовые команды бота"""
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    # Можно добавить ещё тестовые команды, если нужно
+    application.add_handler(CommandHandler("myid", myid_command))
