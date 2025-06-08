@@ -94,25 +94,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text)
     logger.info(f"Команда /start от пользователя {user.id}")
 
+# Замените функцию help_command на эту версию (обычный текст):
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📚 <b>DailyCheck Bot - Справка</b>\n\n"
-        "🤖 <b>AI Функции:</b>\n"
+        "📚 DailyCheck Bot - Справка\n\n"
+        "🤖 AI Функции:\n"
         "• Просто напишите сообщение\n"
-        "• Используйте /ai <текст>\n"
+        "• Используйте /ai <ваш вопрос>\n"
         "• Спрашивайте о продуктивности\n\n"
-        "🔧 <b>Команды:</b>\n"
+        "🔧 Команды:\n"
         "/start - главное меню\n"
         "/help - эта справка\n"
         "/ping - проверка бота\n"
         "/ai <текст> - прямой запрос к AI\n\n"
-        "💡 <b>Примеры вопросов:</b>\n"
+        "💡 Примеры вопросов:\n"
         "• Как лучше планировать день?\n"
         "• Помоги с мотивацией\n"
         "• Создай список задач на завтра\n"
         "• Как бороться с прокрастинацией?"
     )
-    await update.message.reply_html(help_text)
+    await update.message.reply_text(help_text)  # Используем reply_text вместо reply_html
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ping_text = (
