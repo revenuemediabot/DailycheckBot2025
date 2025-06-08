@@ -1,214 +1,294 @@
-# main.py - Минимальная рабочая версия
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 import os
 import sys
 import logging
 import asyncio
+import threading
+import signal
 from pathlib import Path
-
-# Добавляем путь к модулям
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+    format='%(asctime)s [%(levelname)s] %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Импорт зависимостей с обработкой ошибок
-try:
-    from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
-    from telegram import Update
-    from telegram.ext import ContextTypes
-except ImportError as e:
-    logger.error(f"Ошибка импорта Telegram библиотек: {e}")
-    sys.exit(1)
-
-# Загрузка переменных окружения
+# Переменные окружения
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    logger.warning("python-dotenv не установлен")
+    pass
 
-# Конфигурация
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PORT = int(os.getenv("PORT", "8080"))
 
 if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN не найден в переменных окружения!")
+    logger.error("❌ BOT_TOKEN не найден!")
     sys.exit(1)
 
-# Базовые обработчики команд
+logger.info(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
+if OPENAI_API_KEY:
+    logger.info(f"🤖 OpenAI: {OPENAI_API_KEY[:10]}...")
+
+# Импорты Telegram
+try:
+    from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters
+    from telegram import Update
+    from telegram.ext import ContextTypes
+except ImportError as e:
+    logger.error(f"Ошибка импорта telegram: {e}")
+    sys.exit(1)
+
+# Глобальные переменные
+app = None
+http_server = None
+running = True
+
+# === ОБРАБОТЧИКИ КОМАНД ===
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
     user = update.effective_user
     await update.message.reply_text(
-        f"Привет, {user.first_name}! 👋\n"
-        "Я — DailyCheck Bot для трекинга задач и привычек.\n"
-        "Используй /help для списка команд."
+        f"🚀 Привет, {user.first_name}!\n\n"
+        f"Я DailyCheck Bot - твой ассистент для продуктивности.\n\n"
+        f"Команды:\n"
+        f"/start - главное меню\n"
+        f"/help - справка\n"
+        f"/health - проверка бота\n\n"
+        f"💬 Просто пиши мне - я отвечу через AI!"
     )
+    logger.info(f"Старт от пользователя {user.id}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /help"""
     help_text = (
-        "🛠 <b>Доступные команды:</b>\n"
-        "/start — начать работу\n"
-        "/help — справка\n"
-        "/health — проверка работы бота\n"
-        "/echo — повторить сообщение\n"
-        "\n📧 Для получения полного функционала настройте OpenAI API ключ"
+        "📖 <b>DailyCheck Bot - справка</b>\n\n"
+        "🔧 <b>Команды:</b>\n"
+        "/start - начать работу\n"
+        "/help - эта справка\n"
+        "/health - проверка работы\n\n"
+        "🤖 <b>AI-функции:</b>\n"
+        "• Просто напишите сообщение\n"
+        "• Бот ответит через ChatGPT\n"
+        "• Задавайте вопросы о продуктивности\n\n"
+        "💡 <b>Примеры:</b>\n"
+        "• 'Как лучше планировать день?'\n"
+        "• 'Помоги с мотивацией'\n"
+        "• 'Создай список задач'"
     )
     await update.message.reply_html(help_text)
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /health для проверки"""
-    await update.message.reply_text("✅ Бот работает нормально!")
+    await update.message.reply_text(
+        "✅ Бот работает отлично!\n"
+        f"🤖 AI: {'включен' if OPENAI_API_KEY else 'выключен'}\n"
+        f"🔗 HTTP: работает на порту {PORT}"
+    )
 
-async def echo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /echo"""
-    if context.args:
-        text = " ".join(context.args)
-        await update.message.reply_text(f"Эхо: {text}")
-    else:
-        await update.message.reply_text("Использование: /echo <текст>")
+# === AI ОБРАБОТЧИК ===
 
-# AI обработчик (опционально)
-async def ai_response(user_text: str) -> str:
-    """Простой AI ответ"""
+async def generate_ai_response(user_text: str, user_name: str = "друг") -> str:
+    """Генерация AI ответа"""
     if not OPENAI_API_KEY:
-        return "🤖 AI временно недоступен. Настройте OPENAI_API_KEY для полного функционала."
+        return (
+            f"🤖 Привет! AI временно недоступен.\n"
+            f"Но я всё равно рад нашему общению!\n\n"
+            f"Вы написали: '{user_text}'"
+        )
     
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
+        system_prompt = (
+            "Ты полезный AI-ассистент для продуктивности и планирования. "
+            "Отвечай дружелюбно, кратко и по делу. "
+            "Помогай с задачами, мотивацией и организацией времени. "
+            "Используй эмодзи для наглядности."
+        )
+        
         response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты полезный ассистент для продуктивности."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
             ],
-            max_tokens=200
+            max_tokens=300,
+            temperature=0.7
         )
-        return response.choices[0].message.content
+        
+        return response.choices[0].message.content.strip()
+        
     except Exception as e:
         logger.error(f"Ошибка AI: {e}")
-        return "⚠️ Ошибка при обращении к AI. Попробуйте позже."
+        return (
+            f"⚠️ Произошла ошибка с AI.\n"
+            f"Но я запомнил ваше сообщение: '{user_text}'\n"
+            f"Попробуйте ещё раз через минуту!"
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик обычных сообщений"""
+    """Обработчик текстовых сообщений"""
     user_text = update.message.text
+    user = update.effective_user
     
-    # Показываем индикатор печати
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    logger.info(f"Сообщение от {user.id} (@{user.username}): {user_text[:50]}...")
     
-    # Получаем ответ
-    response = await ai_response(user_text)
-    await update.message.reply_text(response)
-
-# Health check сервер
-async def start_health_server():
-    """Простой health check"""
+    # Показываем "печатает"
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, 
+        action="typing"
+    )
+    
+    # Генерируем ответ
     try:
-        from aiohttp import web
-        
-        async def health_handler(request):
-            return web.json_response({
-                "status": "ok",
-                "message": "DailyCheck Bot работает!",
-                "version": "4.0"
-            })
-        
-        app = web.Application()
-        app.router.add_get('/health', health_handler)
-        app.router.add_get('/', health_handler)
-        
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logger.info(f"✅ Health server запущен на порту {PORT}")
-        
-    except ImportError:
-        logger.warning("aiohttp недоступен, health server отключен")
+        response = await generate_ai_response(user_text, user.first_name)
+        await update.message.reply_text(response)
     except Exception as e:
-        logger.error(f"Ошибка health server: {e}")
+        logger.error(f"Ошибка обработки сообщения: {e}")
+        await update.message.reply_text(
+            "😅 Что-то пошло не так, но я стараюсь! Попробуйте ещё раз."
+        )
 
-class DailyCheckBot:
-    def __init__(self):
-        self.application = None
+# === HTTP СЕРВЕР ===
+
+def start_http_server():
+    """Запуск простого HTTP сервера для health check"""
+    import http.server
+    import socketserver
+    import json
     
-    async def start(self):
-        """Запуск бота"""
+    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ['/', '/health']:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                response_data = {
+                    "status": "ok",
+                    "service": "dailycheck-bot",
+                    "version": "4.0",
+                    "ai_enabled": bool(OPENAI_API_KEY),
+                    "message": "DailyCheck Bot работает!"
+                }
+                
+                self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
+            else:
+                self.send_response(404)
+                self.end_headers()
+        
+        def log_message(self, format, *args):
+            # Отключаем HTTP логи
+            pass
+    
+    def run_server():
         try:
-            logger.info("🚀 Запуск DailyCheck Bot v4.0...")
-            
-            # Создание приложения
-            self.application = ApplicationBuilder().token(BOT_TOKEN).build()
-            
-            # Регистрация обработчиков
-            self.application.add_handler(CommandHandler("start", start_command))
-            self.application.add_handler(CommandHandler("help", help_command))
-            self.application.add_handler(CommandHandler("health", health_command))
-            self.application.add_handler(CommandHandler("echo", echo_command))
-            
-            # AI чат для обычных сообщений
-            self.application.add_handler(
-                MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
-            )
-            
-            # Запуск health сервера
-            await start_health_server()
-            
-            # Запуск бота
-            logger.info("✅ Бот готов к работе!")
-            await self.application.run_polling(drop_pending_updates=True)
-            
+            with socketserver.TCPServer(("", PORT), HealthHandler) as httpd:
+                logger.info(f"✅ HTTP сервер запущен на порту {PORT}")
+                httpd.serve_forever()
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка: {e}")
-            raise
+            logger.error(f"Ошибка HTTP сервера: {e}")
+    
+    # Запускаем в отдельном потоке
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    return server_thread
 
-async def main():
-    """Главная функция"""
-    bot = DailyCheckBot()
+# === ОСНОВНАЯ ЛОГИКА ===
+
+def create_bot_application():
+    """Создание приложения бота"""
+    global app
+    
     try:
-        await bot.start()
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # Регистрируем обработчики
+        app.add_handler(CommandHandler("start", start_command))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("health", health_command))
+        
+        # AI чат
+        app.add_handler(
+            MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
+        )
+        
+        logger.info("✅ Приложение создано")
+        return app
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания приложения: {e}")
+        raise
+
+async def run_bot():
+    """Запуск бота"""
+    global running
+    
+    try:
+        logger.info("🚀 Запуск DailyCheck Bot v4.0...")
+        
+        # HTTP сервер
+        http_thread = start_http_server()
+        
+        # Создание бота
+        application = create_bot_application()
+        
+        logger.info("✅ Бот готов к работе!")
+        logger.info("📱 Найдите своего бота в Telegram и отправьте /start")
+        
+        # Запуск polling
+        await application.run_polling(
+            drop_pending_updates=True,
+            stop_signals=[]  # Отключаем автоматическую обработку сигналов
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в run_bot: {e}")
+        running = False
+        raise
+
+def signal_handler(signum, frame):
+    """Обработчик сигналов остановки"""
+    global running
+    logger.info(f"Получен сигнал {signum}. Остановка...")
+    running = False
+
+# === ТОЧКА ВХОДА ===
+
+def main():
+    """Главная функция"""
+    global running
+    
+    # Настройка обработчиков сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Информация о системе
+    logger.info(f"Python: {sys.version}")
+    logger.info(f"Платформа: {sys.platform}")
+    logger.info(f"Директория: {os.getcwd()}")
+    
+    try:
+        # Запуск бота
+        asyncio.run(run_bot())
     except KeyboardInterrupt:
         logger.info("👋 Остановка по Ctrl+C")
     except Exception as e:
-        logger.error(f"Фатальная ошибка: {e}")
+        logger.error(f"💥 Фатальная ошибка: {e}")
+        sys.exit(1)
+    finally:
+        logger.info("🛑 Бот остановлен")
 
 if __name__ == "__main__":
-    print("🚀 Запуск DailyCheck Bot...")
+    print("🚀 DailyCheck Bot запускается...")
     
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 До свидания!")
-    except Exception as e:
-        print(f"❌ Критическая ошибка: {e}")
-
-# =================================================================
-# .env (создайте этот файл в корне проекта)
-# =================================================================
-"""
-# Скопируйте эти переменные в файл .env
-BOT_TOKEN=YOUR_BOT_TOKEN_HERE
-OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE
-PORT=8080
-"""
-
-# =================================================================
-# requirements.txt (обновленная минимальная версия)
-# =================================================================
-"""
-python-telegram-bot==20.7
-python-dotenv
-openai
-aiohttp
-"""
+    # Проверка версии Python
+    if sys.version_info < (3, 8):
+        print("❌ Требуется Python 3.8+")
+        sys.exit(1)
+    
+    main()
