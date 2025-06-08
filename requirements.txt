@@ -1,0 +1,9 @@
+python-dotenv
+python-telegram-bot==20.7
+apscheduler
+psutil
+filelock
+gspread
+google-auth
+openai
+nest_asyncio
