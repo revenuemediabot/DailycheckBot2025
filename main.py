@@ -1758,9 +1758,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     
     if data == "show_tasks":
-        await tasks_command(update, context)
+        await show_tasks_callback(query, context)
     elif data == "show_stats":
-        await stats_command(update, context)
+        await show_stats_callback(query, context)
     elif data == "show_achievements":
         achievements_list = [ACHIEVEMENTS[i] for i in user_achievements.get(user_id, [])]
         text = "🏆 **Ваши достижения:**\n\n"
@@ -1787,9 +1787,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text, parse_mode="Markdown")
     elif data == "show_settings":
-        await settings_command(update, context)
+        await show_settings_callback(query, context)
     elif data == "show_weekly_goals":
-        await weekly_goals_command(update, context)
+        await show_weekly_goals_callback(query, context)
     elif data.startswith("complete_task_"):
         task_index = int(data.split("_")[2])
         if task_index < len(users_data[user_id]["tasks"]):
@@ -1852,7 +1852,175 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Все задачи помечены как невыполненные.\n"
             "Начните новый продуктивный день!"
         )
-    # Добавьте остальные обработчики кнопок по необходимости...
+
+# Отдельные функции для callback'ов
+async def show_tasks_callback(query, context):
+    """Показать задачи через callback"""
+    user_id = query.from_user.id
+    init_user(user_id)
+    log_command(user_id, "callback_tasks")
+    
+    tasks = users_data[user_id]["tasks"]
+    if not tasks:
+        keyboard = [
+            [InlineKeyboardButton("➕ Добавить задачу", callback_data="add_task_dialog")],
+            [InlineKeyboardButton("📝 Быстрая установка", callback_data="quick_setup")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📋 У вас пока нет задач.\n\n"
+            "Добавьте первую задачу и начните путь к продуктивности!",
+            reply_markup=reply_markup
+        )
+        return
+    
+    text = "📋 **Ваши задачи:**\n\n"
+    keyboard = []
+    
+    for i, task in enumerate(tasks):
+        status = "✅" if task.get("completed", False) else "⭕"
+        priority_emoji = PRIORITIES[task.get("priority", "medium")]["emoji"]
+        category_emoji = CATEGORIES[task.get("category", "personal")]["emoji"]
+        
+        text += f"{status} {i+1}. {task['name']}\n"
+        text += f"   {category_emoji} {priority_emoji}"
+        if task.get("estimate"):
+            text += f" ⏱️ {task['estimate']} мин"
+        
+        # Подзадачи
+        if task.get("subtasks"):
+            text += f"\n   📝 Подзадачи ({len(task['subtasks'])}):"
+            for j, subtask in enumerate(task["subtasks"]):
+                sub_status = "✅" if subtask.get("completed", False) else "⭕"
+                text += f"\n      {sub_status} {j+1}. {subtask['name']}"
+        
+        text += "\n\n"
+        
+        # Кнопки для незавершенных задач
+        if not task.get("completed", False):
+            keyboard.append([InlineKeyboardButton(f"✅ Задача {i+1}", callback_data=f"complete_task_{i}")])
+    
+    keyboard.extend([
+        [InlineKeyboardButton("➕ Добавить", callback_data="add_task_dialog"),
+         InlineKeyboardButton("✏️ Редактировать", callback_data="edit_tasks")],
+        [InlineKeyboardButton("🔄 Сбросить день", callback_data="reset_day")]
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def show_stats_callback(query, context):
+    """Показать статистику через callback"""
+    user_id = query.from_user.id
+    init_user(user_id)
+    log_command(user_id, "callback_stats")
+    
+    users_data[user_id]["stats_views"] += 1
+    user = users_data[user_id]
+    level_info = get_user_level(user["xp"])
+    
+    total_tasks = len(user["tasks"])
+    completed_tasks = sum(1 for task in user["tasks"] if task.get("completed", False))
+    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+    
+    text = f"📊 **Детальная статистика**\n\n"
+    text += f"👤 Уровень: {level_info[1]}\n"
+    text += f"⚡ XP: {user['xp']}/{(level_info[0] + 1) * 100}\n"
+    text += f"🔥 Стрик: {user['streak']} дней\n"
+    text += f"📋 Всего задач: {total_tasks}\n"
+    text += f"✅ Выполнено: {completed_tasks}\n"
+    text += f"📈 Процент выполнения: {completion_rate:.1f}%\n\n"
+    text += f"🏆 Достижений: {len(user_achievements[user_id])}/{len(ACHIEVEMENTS)}\n"
+    text += f"👥 Друзей: {len(user_friends[user_id])}\n"
+    
+    achievements = check_achievements(user_id)
+    if achievements:
+        text += f"\n🏆 Новые достижения: {', '.join(achievements)}"
+    
+    save_user_data()
+    await query.edit_message_text(text, parse_mode="Markdown")
+
+async def show_settings_callback(query, context):
+    """Показать настройки через callback"""
+    user_id = query.from_user.id
+    init_user(user_id)
+    
+    user = users_data[user_id]
+    theme = THEMES[user_themes[user_id]]["name"]
+    ai_chat = user_ai_chat[user_id]
+    
+    text = f"⚙️ **Настройки пользователя**\n\n"
+    text += f"🎨 Тема: {theme}\n"
+    text += f"🤖 AI-чат: {'включен' if ai_chat else 'выключен'}\n"
+    text += f"🚭 Dry режим: {'включен' if user['dry_mode'] else 'выключен'}\n"
+    text += f"📅 Регистрация: {user['created_at'][:10]}\n"
+    text += f"📊 Уровень: {get_user_level(user['xp'])[1]}\n"
+    text += f"⚡ XP: {user['xp']}\n"
+    text += f"🔥 Стрик: {user['streak']} дней\n\n"
+    
+    text += "**Команды для изменения:**\n"
+    text += "• `/theme` - сменить тему\n"
+    text += "• `/ai_chat` - переключить AI-чат\n"
+    text += "• `/dryon` или `/dryoff` - dry режим\n"
+    text += "• `/export` - экспорт ваших данных"
+    
+    keyboard = [
+        [InlineKeyboardButton("🎨 Сменить тему", callback_data="change_theme")],
+        [InlineKeyboardButton("🤖 Переключить AI", callback_data="toggle_ai")],
+        [InlineKeyboardButton("📤 Экспорт данных", callback_data="export_data")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def show_weekly_goals_callback(query, context):
+    """Показать еженедельные цели через callback"""
+    user_id = query.from_user.id
+    init_user(user_id)
+    
+    goals = users_data[user_id]["weekly_goals"]
+    if not goals:
+        keyboard = [
+            [InlineKeyboardButton("🎯 Установить цели", callback_data="set_weekly_goals")],
+            [InlineKeyboardButton("💡 Примеры целей", callback_data="example_goals")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🎯 **У вас пока нет еженедельных целей.**\n\n"
+            "Еженедельные цели помогают:\n"
+            "• Планировать долгосрочные задачи\n"
+            "• Поддерживать мотивацию\n"
+            "• Отслеживать прогресс\n\n"
+            "Установите свои первые цели!",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return
+    
+    text = "🎯 **Еженедельные цели:**\n\n"
+    keyboard = []
+    
+    for i, goal in enumerate(goals, 1):
+        status = "✅" if goal.get("completed", False) else "⭕"
+        progress = goal.get("progress", 0)
+        target = goal.get("target", 1)
+        
+        text += f"{status} {i}. {goal['name']}\n"
+        if target > 1:
+            text += f"   📊 Прогресс: {progress}/{target}\n"
+        text += f"   📅 Создана: {goal['created_at'][:10]}\n\n"
+        
+        if not goal.get("completed", False):
+            keyboard.append([InlineKeyboardButton(f"✅ Цель {i}", callback_data=f"complete_goal_{i-1}")])
+    
+    keyboard.extend([
+        [InlineKeyboardButton("➕ Добавить цель", callback_data="add_weekly_goal")],
+        [InlineKeyboardButton("🔄 Новая неделя", callback_data="reset_weekly_goals")]
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # ===================== ОСНОВНАЯ ФУНКЦИЯ =====================
 
