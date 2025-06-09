@@ -1,37 +1,475 @@
-# DailyCheck Bot v4.0 - Зависимости
-
-# Основные зависимости
+# ===== requirements.txt =====
 python-telegram-bot==20.7
 nest-asyncio==1.5.8
 python-dotenv==1.0.0
-
-# AI интеграция (опционально)
 openai==1.6.1
-
-# Планировщик задач (для напоминаний)
 APScheduler==3.10.4
-
-# Работа с данными
 pandas==2.1.4
 openpyxl==3.1.2
-
-# Google Sheets интеграция (опционально)
-google-auth==2.24.0
-google-auth-oauthlib==1.1.0
-google-auth-httplib2==0.1.1
-google-api-python-client==2.108.0
-
-# Веб-сервер
 aiohttp==3.9.1
-
-# Логирование и мониторинг
 psutil==5.9.6
-
-# Утилиты
 requests==2.31.0
 pytz==2023.3
 
-# Для разработки (опционально)
-# black==23.11.0
-# flake8==6.1.0
-# pytest==7.4.3
+# ===== .env =====
+BOT_TOKEN=your_bot_token_here
+OPENAI_API_KEY=your_openai_key_here
+PORT=10000
+DEBUG=false
+
+# ===== render.yaml =====
+services:
+  - type: web
+    name: dailycheck-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PORT
+        value: 10000
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+    healthCheckPath: /
+
+# ===== Dockerfile =====
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка зависимостей
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копирование кода
+COPY . .
+
+# Создание необходимых директорий
+RUN mkdir -p data logs exports
+
+# Переменные окружения
+ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import os; print('Health OK')" || exit 1
+
+# Команда запуска
+CMD ["python", "main.py"]
+
+# ===== docker-compose.yml =====
+version: '3.8'
+
+services:
+  dailycheck-bot:
+    build: .
+    container_name: dailycheck-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+    environment:
+      - PYTHONPATH=/app
+    ports:
+      - "10000:10000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; print('Health OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ===== tasks.py (расширенные обработчики задач) =====
+import uuid
+from datetime import date, datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import ContextTypes, ConversationHandler
+
+# Состояния для ConversationHandler
+TASK_TITLE, TASK_DESCRIPTION, TASK_PRIORITY, TASK_TAGS = range(4)
+
+async def add_task_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало добавления новой задачи"""
+    await update.message.reply_text(
+        "📝 **Создание новой задачи**\n\nВведите название задачи:",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='Markdown'
+    )
+    return TASK_TITLE
+
+async def add_task_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение названия задачи"""
+    title = update.message.text.strip()
+    
+    if len(title) > 100:
+        await update.message.reply_text(
+            "❌ Название слишком длинное! Максимум 100 символов.\nВведите название еще раз:"
+        )
+        return TASK_TITLE
+    
+    context.user_data['task_title'] = title
+    
+    await update.message.reply_text(
+        f"✅ Название: **{title}**\n\nТеперь введите описание задачи (или отправьте 'пропустить'):",
+        parse_mode='Markdown'
+    )
+    return TASK_DESCRIPTION
+
+async def add_task_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение описания задачи"""
+    description = update.message.text.strip()
+    
+    if description.lower() in ['пропустить', 'skip', '-']:
+        description = None
+    elif len(description) > 500:
+        await update.message.reply_text(
+            "❌ Описание слишком длинное! Максимум 500 символов.\nВведите описание еще раз (или 'пропустить'):"
+        )
+        return TASK_DESCRIPTION
+    
+    context.user_data['task_description'] = description
+    
+    # Клавиатура для выбора приоритета
+    keyboard = [
+        [InlineKeyboardButton("🔴 Высокий", callback_data="priority_high")],
+        [InlineKeyboardButton("🟡 Средний", callback_data="priority_medium")],
+        [InlineKeyboardButton("🔵 Низкий", callback_data="priority_low")]
+    ]
+    
+    await update.message.reply_text(
+        f"✅ Описание: {description or 'не указано'}\n\nВыберите приоритет задачи:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return TASK_PRIORITY
+
+async def add_task_priority(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение приоритета задачи"""
+    query = update.callback_query
+    await query.answer()
+    
+    priority_map = {
+        "priority_high": "high",
+        "priority_medium": "medium",
+        "priority_low": "low"
+    }
+    
+    priority = priority_map.get(query.data, "medium")
+    context.user_data['task_priority'] = priority
+    
+    await query.edit_message_text(
+        f"✅ Приоритет: {priority}\n\nВведите теги через запятую (или 'пропустить'):"
+    )
+    return TASK_TAGS
+
+async def add_task_tags(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получение тегов и создание задачи"""
+    from main import Task  # Импортируем класс Task
+    
+    tags_text = update.message.text.strip()
+    
+    if tags_text.lower() in ['пропустить', 'skip', '-']:
+        tags = []
+    else:
+        tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+        tags = tags[:5]  # Максимум 5 тегов
+    
+    # Создаем задачу
+    db = context.application.bot_data['db']
+    user = db.get_or_create_user(update.effective_user.id)
+    
+    task = Task(
+        task_id=str(uuid.uuid4()),
+        user_id=user.user_id,
+        title=context.user_data['task_title'],
+        description=context.user_data.get('task_description'),
+        priority=context.user_data['task_priority'],
+        tags=tags
+    )
+    
+    # Добавляем задачу пользователю
+    user.tasks[task.task_id] = task
+    user.stats.total_tasks += 1
+    
+    # Сохраняем
+    db.save_all_users()
+    
+    # Очищаем данные из контекста
+    context.user_data.clear()
+    
+    from main import format_task_info, get_main_keyboard
+    success_text = f"🎉 **Задача создана!**\n\n{format_task_info(task)}"
+    
+    await update.message.reply_text(
+        success_text,
+        reply_markup=get_main_keyboard(),
+        parse_mode='Markdown'
+    )
+    
+    return ConversationHandler.END
+
+async def cancel_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отмена добавления задачи"""
+    context.user_data.clear()
+    from main import get_main_keyboard
+    await update.message.reply_text(
+        "❌ Создание задачи отменено.",
+        reply_markup=get_main_keyboard()
+    )
+    return ConversationHandler.END
+
+# ===== clear_bot.py (скрипт для очистки конфликтов) =====
+import asyncio
+import os
+from telegram import Bot
+
+async def clear_telegram_bot():
+    """Принудительная очистка бота от конфликтов"""
+    bot_token = os.getenv('BOT_TOKEN')
+    if not bot_token:
+        print("❌ BOT_TOKEN не найден в переменных окружения")
+        return
+    
+    bot = Bot(token=bot_token)
+    
+    try:
+        print("🔄 Начинаем очистку бота...")
+        
+        # 1. Удаляем webhook с очисткой pending updates
+        result = await bot.delete_webhook(drop_pending_updates=True)
+        print(f"✅ Webhook удален: {result}")
+        
+        # 2. Получаем и очищаем все накопившиеся updates
+        updates = await bot.get_updates(timeout=2)
+        print(f"📨 Найдено {len(updates)} обновлений")
+        
+        if updates:
+            # Очищаем с offset последнего update_id
+            last_id = updates[-1].update_id
+            await bot.get_updates(offset=last_id + 1, timeout=2)
+            print("🧹 Очередь обновлений очищена")
+        
+        # 3. Дополнительная очистка
+        await asyncio.sleep(2)
+        final_updates = await bot.get_updates(timeout=1)
+        if final_updates:
+            last_id = final_updates[-1].update_id
+            await bot.get_updates(offset=last_id + 1, timeout=1)
+            print("🧹 Финальная очистка выполнена")
+        
+        print("✅ Бот успешно очищен и готов к перезапуску!")
+        
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+    finally:
+        await bot.close()
+
+if __name__ == "__main__":
+    # Загружаем переменные окружения
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    asyncio.run(clear_telegram_bot())
+
+# ===== Makefile =====
+.PHONY: help install start stop logs clean clear-bot deploy
+
+help:
+	@echo "DailyCheck Bot v4.0 - Доступные команды:"
+	@echo "  install     - Установка зависимостей"
+	@echo "  start       - Запуск бота локально"
+	@echo "  stop        - Остановка бота"
+	@echo "  logs        - Просмотр логов"
+	@echo "  clean       - Очистка временных файлов"
+	@echo "  clear-bot   - Очистка конфликтов Telegram"
+	@echo "  deploy      - Деплой на Render"
+
+install:
+	pip install -r requirements.txt
+
+start:
+	python main.py
+
+stop:
+	pkill -f "python main.py" || true
+
+logs:
+	tail -f bot.log
+
+clean:
+	find . -type f -name "*.pyc" -delete
+	find . -type d -name "__pycache__" -delete
+	rm -f bot.log
+
+clear-bot:
+	python clear_bot.py
+
+deploy:
+	@echo "🚀 Деплой на Render.com:"
+	@echo "1. Залейте код в репозиторий"
+	@echo "2. Подключите репозиторий к Render"
+	@echo "3. Установите переменные окружения"
+	@echo "4. Запустите деплой"
+
+# ===== .gitignore =====
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Environment variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+data/
+users_data.json
+exports/
+backups/
+temp/
+
+# ===== README.md =====
+# 🎯 DailyCheck Bot v4.0
+
+Полнофункциональный Telegram бот для отслеживания ежедневных привычек и задач.
+
+## ✨ Возможности
+
+- 📝 **Управление задачами** с приоритетами и тегами
+- 🔥 **Система streak'ов** для мотивации
+- 📊 **Детальная статистика** и аналитика
+- 🏆 **Достижения** с автоматическими уведомлениями
+- 🤖 **AI советы** для улучшения продуктивности
+- 👥 **Социальные функции** с таблицей лидеров
+- ⚙️ **Гибкие настройки** для персонализации
+
+## 🚀 Быстрый старт
+
+### Локальная установка
+
+```bash
+# Клонируйте репозиторий
+git clone <your-repo-url>
+cd dailycheck-bot
+
+# Установите зависимости
+pip install -r requirements.txt
+
+# Настройте переменные окружения
+cp .env.example .env
+# Отредактируйте .env файл
+
+# Запустите бота
+python main.py
+```
+
+### Деплой на Render.com
+
+1. **Подключите репозиторий** к Render.com
+2. **Установите переменные окружения:**
+   - `BOT_TOKEN` - токен вашего бота от @BotFather
+   - `OPENAI_API_KEY` - ключ OpenAI (опционально)
+3. **Настройки сервиса:**
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `python main.py`
+4. **Запустите деплой**
+
+## 📋 Команды бота
+
+- `/start` - Запуск и главное меню
+- `/tasks` - Список задач
+- `/stats` - Статистика
+- `/help` - Справка
+
+## 🛠️ Решение проблем
+
+### Конфликт "another webhook is active"
+
+```bash
+# Очистите бота от конфликтов
+python clear_bot.py
+```
+
+### Логи и отладка
+
+```bash
+# Просмотр логов
+tail -f bot.log
+
+# Очистка временных файлов
+make clean
+```
+
+## 📖 Документация
+
+Подробная документация доступна в файлах:
+- `deployment_guide.md` - Руководство по развертыванию
+- `API.md` - Описание API и команд
+- `CHANGELOG.md` - История изменений
+
+## 🤝 Поддержка
+
+При возникновении проблем:
+1. Проверьте логи в `bot.log`
+2. Убедитесь в корректности токена
+3. Запустите `python clear_bot.py`
+4. Создайте issue в репозитории
+
+---
+
+**DailyCheck Bot v4.0** - Ваш персональный помощник для формирования полезных привычек! 🎯
