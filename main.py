@@ -1852,6 +1852,184 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Все задачи помечены как невыполненные.\n"
             "Начните новый продуктивный день!"
         )
+    elif data == "add_task_dialog":
+        await query.edit_message_text(
+            "➕ **Добавление задачи**\n\n"
+            "Используйте команду:\n"
+            "`/addtask название [категория] [приоритет] [время]`\n\n"
+            "**Примеры:**\n"
+            "• `/addtask Проверить почту`\n"
+            "• `/addtask Спортзал health high 90`\n"
+            "• `/addtask Изучить Python study medium 60`\n\n"
+            "**Категории:** work, health, study, personal, finance\n"
+            "**Приоритеты:** low, medium, high",
+            parse_mode="Markdown"
+        )
+    elif data == "quick_setup":
+        await query.edit_message_text(
+            "📝 **Быстрая установка задач**\n\n"
+            "Используйте команду:\n"
+            "`/settasks задача1; задача2; задача3`\n\n"
+            "**Пример:**\n"
+            "`/settasks Проверить почту; Сделать зарядку; Прочитать книгу; Купить продукты`\n\n"
+            "💡 **Советы:**\n"
+            "• Разделяйте задачи точкой с запятой (;)\n"
+            "• Можно добавить до 10 задач за раз\n"
+            "• Все задачи получат категорию 'Личное' и средний приоритет",
+            parse_mode="Markdown"
+        )
+    elif data == "random_task":
+        # Генерируем случайную задачу
+        random_tasks = [
+            "Сделать 10-минутную зарядку",
+            "Прочитать 5 страниц книги", 
+            "Выпить стакан воды",
+            "Навести порядок на рабочем столе",
+            "Позвонить родителям/друзьям",
+            "Сделать дыхательные упражнения (5 мин)",
+            "Написать в дневник благодарности",
+            "Послушать подкаст или музыку",
+            "Сделать растяжку",
+            "Планировать завтрашний день"
+        ]
+        
+        task_name = random.choice(random_tasks)
+        theme = THEMES[user_themes[user_id]]
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Добавить эту задачу", callback_data=f"add_random_task_{random_tasks.index(task_name)}")],
+            [InlineKeyboardButton("🎲 Другая задача", callback_data="random_task")],
+            [InlineKeyboardButton("↩️ Назад", callback_data="back_to_start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"{theme['accent']} **Случайная задача**\n\n"
+            f"💡 Предлагаю выполнить:\n"
+            f"📝 **{task_name}**\n\n"
+            f"Хотите добавить эту задачу в свой список?",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    elif data.startswith("add_random_task_"):
+        task_index = int(data.split("_")[3])
+        random_tasks = [
+            "Сделать 10-минутную зарядку",
+            "Прочитать 5 страниц книги", 
+            "Выпить стакан воды",
+            "Навести порядок на рабочем столе",
+            "Позвонить родителям/друзьям",
+            "Сделать дыхательные упражнения (5 мин)",
+            "Написать в дневник благодарности",
+            "Послушать подкаст или музыку",
+            "Сделать растяжку",
+            "Планировать завтрашний день"
+        ]
+        
+        if task_index < len(random_tasks):
+            task_name = random_tasks[task_index]
+            
+            # Добавляем задачу
+            task = {
+                "name": task_name,
+                "completed": False,
+                "created_at": datetime.now().isoformat(),
+                "category": "personal",
+                "priority": "medium",
+                "subtasks": []
+            }
+            
+            users_data[user_id]["tasks"].append(task)
+            users_data[user_id]["total_tasks_created"] += 1
+            
+            xp_msg = add_xp(user_id, 10)
+            achievements = check_achievements(user_id)
+            save_user_data()
+            
+            response = f"✅ **Задача добавлена!**\n"
+            response += f"📝 {task_name}\n"
+            response += f"{xp_msg}"
+            
+            if achievements:
+                response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
+            
+            await query.edit_message_text(response, parse_mode="Markdown")
+    elif data == "back_to_start":
+        # Возвращаемся к главному меню
+        user_data = users_data[user_id]
+        theme = THEMES[user_themes[user_id]]
+        level_info = get_user_level(user_data["xp"])
+        
+        keyboard = [
+            [InlineKeyboardButton(f"📋 Мои задачи ({len(user_data['tasks'])})", callback_data="show_tasks")],
+            [InlineKeyboardButton(f"📊 Статистика", callback_data="show_stats"), 
+             InlineKeyboardButton(f"🏆 Достижения ({len(user_achievements[user_id])})", callback_data="show_achievements")],
+            [InlineKeyboardButton(f"🤖 AI Помощь", callback_data="show_ai_help"),
+             InlineKeyboardButton(f"⚙️ Настройки", callback_data="show_settings")],
+            [InlineKeyboardButton(f"{theme['accent']} Случайная задача", callback_data="random_task"),
+             InlineKeyboardButton(f"🎯 Цели недели", callback_data="show_weekly_goals")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Время суток для приветствия
+        current_hour = datetime.now().hour
+        if 5 <= current_hour < 12:
+            greeting = "🌅 Доброе утро"
+        elif 12 <= current_hour < 17:
+            greeting = "☀️ Добрый день"
+        elif 17 <= current_hour < 22:
+            greeting = "🌆 Добрый вечер"
+        else:
+            greeting = "🌙 Доброй ночи"
+        
+        text = (
+            f"{greeting}!\n\n"
+            f"🤖 DailyCheck Bot v4.0 - ваш AI помощник!\n\n"
+            f"📊 Уровень: {level_info[1]}\n"
+            f"⚡ XP: {user_data['xp']}\n"
+            f"🔥 Стрик: {user_data['streak']} дней\n"
+            f"✅ Сегодня выполнено: {user_data['completed_today']}\n\n"
+            f"🎨 Тема: {theme['name']}\n\n"
+            f"Выберите действие:"
+        )
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    elif data == "set_weekly_goals":
+        await query.edit_message_text(
+            "🎯 **Установка еженедельных целей**\n\n"
+            "Используйте команду:\n"
+            "`/set_weekly цель1; цель2; цель3`\n\n"
+            "**Примеры целей:**\n"
+            "• Прочитать книгу\n"
+            "• Сделать 5 тренировок\n"
+            "• Изучить новую тему\n"
+            "• Встретиться с друзьями\n"
+            "• Завершить проект\n\n"
+            "💡 Цели помогают планировать долгосрочные задачи!",
+            parse_mode="Markdown"
+        )
+    elif data == "example_goals":
+        await query.edit_message_text(
+            "💡 **Примеры еженедельных целей**\n\n"
+            "**🏢 Работа:**\n"
+            "• Завершить отчет по проекту\n"
+            "• Изучить новую технологию\n"
+            "• Провести презентацию\n\n"
+            "**💪 Здоровье:**\n"
+            "• Тренироваться 4 раза\n"
+            "• Пить 2 литра воды ежедневно\n"
+            "• Спать по 8 часов\n\n"
+            "**📚 Обучение:**\n"
+            "• Прочитать книгу\n"
+            "• Пройти онлайн-курс\n"
+            "• Изучить 50 новых слов\n\n"
+            "**👨‍👩‍👧‍👦 Личное:**\n"
+            "• Навестить родителей\n"
+            "• Организовать документы\n"
+            "• Встретиться с друзьями\n\n"
+            "Используйте: `/set_weekly цель1; цель2; цель3`",
+            parse_mode="Markdown"
+        )
 
 # Отдельные функции для callback'ов
 async def show_tasks_callback(query, context):
