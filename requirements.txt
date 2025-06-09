@@ -1,9 +1,37 @@
-python-dotenv
+# DailyCheck Bot v4.0 - Зависимости
+
+# Основные зависимости
 python-telegram-bot==20.7
-apscheduler
-psutil
-filelock
-gspread
-google-auth
-openai
-nest_asyncio
+nest-asyncio==1.5.8
+python-dotenv==1.0.0
+
+# AI интеграция (опционально)
+openai==1.6.1
+
+# Планировщик задач (для напоминаний)
+APScheduler==3.10.4
+
+# Работа с данными
+pandas==2.1.4
+openpyxl==3.1.2
+
+# Google Sheets интеграция (опционально)
+google-auth==2.24.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+google-api-python-client==2.108.0
+
+# Веб-сервер
+aiohttp==3.9.1
+
+# Логирование и мониторинг
+psutil==5.9.6
+
+# Утилиты
+requests==2.31.0
+pytz==2023.3
+
+# Для разработки (опционально)
+# black==23.11.0
+# flake8==6.1.0
+# pytest==7.4.3
