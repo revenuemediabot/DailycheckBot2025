@@ -1,2340 +1,2132 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+DailyCheck Bot v4.0 - Полная версия
+Telegram бот для отслеживания ежедневных привычек и задач
 
-import os
-import sys
-import logging
-import threading
-import time
-import json
+Автор: AI Assistant
+Версия: 4.0.0
+Дата: 2025-06-09
+"""
+
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
-import hashlib
+import logging
+import signal
+import sys
+import os
+import json
 import uuid
 import random
-import csv
-from io import StringIO
+import io
+from datetime import datetime, date, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+from dataclasses import dataclass, field
+from enum import Enum
 
-# Исправление event loop конфликтов
+# Импорты для Render.com совместимости
+import nest_asyncio
+nest_asyncio.apply()
+
+# Telegram Bot API
+from telegram import (
+    Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, 
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+)
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler, 
+    ConversationHandler, ContextTypes, filters
+)
+from telegram.error import Conflict, TimedOut, NetworkError
+
+# Внешние библиотеки
 try:
-    import nest_asyncio
-    nest_asyncio.apply()
-    print("✅ nest_asyncio применен")
+    import openai
+    OPENAI_AVAILABLE = True
 except ImportError:
-    print("⚠️ nest_asyncio недоступен")
+    OPENAI_AVAILABLE = False
 
-# Логирование
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
-
-# Переменные окружения
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except:
-    pass
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
-PORT = int(os.getenv("PORT", "10000"))
-
-if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN не найден!")
-    sys.exit(1)
-
-logger.info(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
-if OPENAI_API_KEY:
-    logger.info(f"✅ OpenAI: {OPENAI_API_KEY[:10]}...")
-
-# ===================== СТРУКТУРЫ ДАННЫХ =====================
-
-# Глобальные данные пользователей
-users_data = {}
-user_achievements = {}
-user_themes = {}
-user_ai_chat = {}
-user_friends = {}
-user_timers = {}
-user_reminders = {}
-global_stats = {"total_users": 0, "commands_executed": 0, "tasks_completed": 0, "ai_requests": 0}
-
-# Уровни и достижения
-LEVELS = [
-    "🌱 Новичок", "🌿 Росток", "🌾 Саженец", "🌳 Дерево", "🍀 Удачливый",
-    "💪 Сильный", "🧠 Умный", "🎯 Целеустремленный", "⚡ Энергичный", "🔥 Огненный",
-    "💎 Алмазный", "👑 Королевский", "🌟 Звездный", "🚀 Космический", "🏆 Легендарный", "👹 Божественный"
-]
-
-ACHIEVEMENTS = [
-    {"name": "Первые шаги", "desc": "Добавить первую задачу", "emoji": "👶", "xp_reward": 10},
-    {"name": "Продуктивный день", "desc": "Выполнить 5 задач за день", "emoji": "💪", "xp_reward": 50},
-    {"name": "Марафонец", "desc": "7 дней подряд выполнять задачи", "emoji": "🏃", "xp_reward": 100},
-    {"name": "Планировщик", "desc": "Создать 20 задач", "emoji": "📋", "xp_reward": 75},
-    {"name": "Социальный", "desc": "Добавить 3 друзей", "emoji": "👥", "xp_reward": 60},
-    {"name": "AI Фанат", "desc": "Сделать 50 AI запросов", "emoji": "🤖", "xp_reward": 80},
-    {"name": "Мастер времени", "desc": "Использовать таймер 10 раз", "emoji": "⏰", "xp_reward": 40},
-    {"name": "Аналитик", "desc": "Посмотреть статистику 15 раз", "emoji": "📊", "xp_reward": 30},
-    {"name": "Целеустремленный", "desc": "Выполнить еженедельную цель", "emoji": "🎯", "xp_reward": 90},
-    {"name": "Легенда", "desc": "Достичь 16 уровня", "emoji": "👑", "xp_reward": 200}
-]
-
-CATEGORIES = {
-    "work": {"name": "🏢 Работа", "emoji": "🏢"},
-    "health": {"name": "💪 Здоровье", "emoji": "💪"},
-    "study": {"name": "📚 Обучение", "emoji": "📚"},
-    "personal": {"name": "👨‍👩‍👧‍👦 Личное", "emoji": "👨‍👩‍👧‍👦"},
-    "finance": {"name": "💰 Финансы", "emoji": "💰"}
-}
-
-PRIORITIES = {
-    "low": {"name": "🟢 Низкий", "emoji": "🟢", "value": 1},
-    "medium": {"name": "🟡 Средний", "emoji": "🟡", "value": 2},
-    "high": {"name": "🔴 Высокий", "emoji": "🔴", "value": 3}
-}
-
-THEMES = {
-    "dark": {"name": "🌙 Темная", "emoji": "🌙", "accent": "⭐"},
-    "light": {"name": "☀️ Светлая", "emoji": "☀️", "accent": "🌟"},
-    "rainbow": {"name": "🌈 Радужная", "emoji": "🌈", "accent": "✨"},
-    "crystal": {"name": "💎 Кристальная", "emoji": "💎", "accent": "💫"},
-    "creative": {"name": "🎨 Креативная", "emoji": "🎨", "accent": "🎭"}
-}
-
-# ===================== HTTP СЕРВЕР =====================
-
-def start_health_server():
-    import http.server
-    import socketserver
-    
-    class HealthHandler(http.server.SimpleHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            
-            data = {
-                "status": "ok",
-                "service": "dailycheck-bot",
-                "version": "4.0",
-                "features": "FULL",
-                "users": global_stats["total_users"],
-                "commands": global_stats["commands_executed"],
-                "tasks_completed": global_stats["tasks_completed"],
-                "ai_requests": global_stats["ai_requests"],
-                "uptime": time.time(),
-                "total_commands": 32,
-                "message": "Bot is running with ALL features!"
-            }
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
-        
-        def log_message(self, format, *args):
-            if '/health' in format or self.path == '/':
-                logger.info(f"Health check: {self.client_address[0]}")
-    
-    def run_server():
-        try:
-            with socketserver.TCPServer(("0.0.0.0", PORT), HealthHandler) as httpd:
-                logger.info(f"✅ HTTP сервер ЗАПУЩЕН на 0.0.0.0:{PORT}")
-                httpd.serve_forever()
-        except Exception as e:
-            logger.error(f"❌ HTTP server ошибка: {e}")
-    
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
-    time.sleep(2)
-    logger.info(f"🌐 Health check доступен на http://0.0.0.0:{PORT}")
-    return server_thread
-
-# ===================== УТИЛИТЫ И СОХРАНЕНИЕ ДАННЫХ =====================
-
-def save_user_data():
-    """Сохранение данных пользователей в файлы"""
-    try:
-        os.makedirs('data', exist_ok=True)
-        
-        all_data = {
-            'users_data': users_data,
-            'user_achievements': user_achievements,
-            'user_themes': user_themes,
-            'user_ai_chat': user_ai_chat,
-            'user_friends': user_friends,
-            'user_timers': user_timers,
-            'user_reminders': user_reminders,
-            'global_stats': global_stats,
-            'last_saved': datetime.now().isoformat()
-        }
-        
-        with open('data/bot_data.json', 'w', encoding='utf-8') as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=2, default=str)
-        
-        logger.info("💾 Данные сохранены")
-    except Exception as e:
-        logger.error(f"❌ Ошибка сохранения данных: {e}")
-
-def load_user_data():
-    """Загрузка данных пользователей из файлов"""
-    try:
-        with open('data/bot_data.json', 'r', encoding='utf-8') as f:
-            all_data = json.load(f)
-            
-        global users_data, user_achievements, user_themes, user_ai_chat, user_friends
-        global user_timers, user_reminders, global_stats
-        
-        users_data.update(all_data.get('users_data', {}))
-        user_achievements.update(all_data.get('user_achievements', {}))
-        user_themes.update(all_data.get('user_themes', {}))
-        user_ai_chat.update(all_data.get('user_ai_chat', {}))
-        user_friends.update(all_data.get('user_friends', {}))
-        user_timers.update(all_data.get('user_timers', {}))
-        user_reminders.update(all_data.get('user_reminders', {}))
-        global_stats.update(all_data.get('global_stats', {}))
-        
-        logger.info(f"📂 Загружены данные для {len(users_data)} пользователей")
-    except FileNotFoundError:
-        logger.info("📂 Файл данных не найден, начинаем с пустой базы")
-    except Exception as e:
-        logger.error(f"❌ Ошибка загрузки данных: {e}")
-
-def init_user(user_id: int) -> None:
-    """Инициализация нового пользователя"""
-    if user_id not in users_data:
-        users_data[user_id] = {
-            "tasks": [],
-            "completed_today": 0,
-            "streak": 0,
-            "last_activity": datetime.now().strftime("%Y-%m-%d"),
-            "xp": 0,
-            "level": 0,
-            "weekly_goals": [],
-            "dry_mode": False,
-            "dry_days": 0,
-            "created_at": datetime.now().isoformat(),
-            "stats_views": 0,
-            "timer_uses": 0,
-            "total_tasks_created": 0,
-            "total_tasks_completed": 0
-        }
-        user_achievements[user_id] = []
-        user_themes[user_id] = "dark"
-        user_ai_chat[user_id] = False
-        user_friends[user_id] = []
-        user_timers[user_id] = []
-        user_reminders[user_id] = []
-        global_stats["total_users"] += 1
-        save_user_data()
-
-def get_user_level(xp: int) -> Tuple[int, str]:
-    """Получить уровень пользователя по XP"""
-    level = min(xp // 100, len(LEVELS) - 1)
-    return level, LEVELS[level]
-
-def add_xp(user_id: int, amount: int) -> str:
-    """Добавить XP пользователю и проверить новый уровень"""
-    old_level = get_user_level(users_data[user_id]["xp"])[0]
-    users_data[user_id]["xp"] += amount
-    new_level = get_user_level(users_data[user_id]["xp"])[0]
-    
-    if new_level > old_level:
-        return f"🎉 Поздравляем! Новый уровень: {LEVELS[new_level]}"
-    return f"+{amount} XP"
-
-def check_achievements(user_id: int) -> List[str]:
-    """Проверка достижений пользователя"""
-    user = users_data[user_id]
-    new_achievements = []
-    
-    # Проверка условий для достижений
-    checks = [
-        (user["total_tasks_created"] >= 1, 0),  # Первые шаги
-        (user["completed_today"] >= 5, 1),      # Продуктивный день
-        (user["streak"] >= 7, 2),               # Марафонец
-        (user["total_tasks_created"] >= 20, 3), # Планировщик
-        (len(user_friends[user_id]) >= 3, 4),   # Социальный
-        (global_stats.get("ai_requests", 0) >= 50, 5),  # AI Фанат
-        (user["timer_uses"] >= 10, 6),          # Мастер времени
-        (user["stats_views"] >= 15, 7),         # Аналитик
-        (len(user["weekly_goals"]) > 0, 8),     # Целеустремленный
-        (get_user_level(user["xp"])[0] >= 15, 9) # Легенда
-    ]
-    
-    for condition, achievement_id in checks:
-        if condition and achievement_id not in user_achievements[user_id]:
-            user_achievements[user_id].append(achievement_id)
-            achievement = ACHIEVEMENTS[achievement_id]
-            add_xp(user_id, achievement["xp_reward"])
-            new_achievements.append(f"{achievement['emoji']} {achievement['name']}")
-    
-    return new_achievements
-
-def log_command(user_id: int, command: str):
-    """Логирование команд"""
-    global_stats["commands_executed"] += 1
-    logger.info(f"Команда {command} от пользователя {user_id}")
-
-# ===================== TELEGRAM ИМПОРТЫ =====================
-
-try:
-    from telegram.ext import (Application, ApplicationBuilder, CommandHandler, 
-                             MessageHandler, filters, CallbackQueryHandler)
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-    from telegram.ext import ContextTypes
-    logger.info("✅ Telegram библиотеки импортированы")
-except ImportError as e:
-    logger.error(f"❌ Ошибка импорта Telegram: {e}")
-    sys.exit(1)
-
-# ===================== ОСНОВНЫЕ КОМАНДЫ =====================
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Главное меню и интерактивный список задач"""
-    user = update.effective_user
-    user_id = user.id
-    init_user(user_id)
-    log_command(user_id, "/start")
-    
-    # Получаем данные пользователя
-    user_data = users_data[user_id]
-    theme = THEMES[user_themes[user_id]]
-    level_info = get_user_level(user_data["xp"])
-    
-    # Время суток для приветствия
-    current_hour = datetime.now().hour
-    if 5 <= current_hour < 12:
-        greeting = "🌅 Доброе утро"
-    elif 12 <= current_hour < 17:
-        greeting = "☀️ Добрый день"
-    elif 17 <= current_hour < 22:
-        greeting = "🌆 Добрый вечер"
-    else:
-        greeting = "🌙 Доброй ночи"
-    
-    # Интерактивная клавиатура
-    keyboard = [
-        [InlineKeyboardButton(f"📋 Мои задачи ({len(user_data['tasks'])})", callback_data="show_tasks")],
-        [InlineKeyboardButton(f"📊 Статистика", callback_data="show_stats"), 
-         InlineKeyboardButton(f"🏆 Достижения ({len(user_achievements[user_id])})", callback_data="show_achievements")],
-        [InlineKeyboardButton(f"🤖 AI Помощь", callback_data="show_ai_help"),
-         InlineKeyboardButton(f"⚙️ Настройки", callback_data="show_settings")],
-        [InlineKeyboardButton(f"{theme['accent']} Случайная задача", callback_data="random_task"),
-         InlineKeyboardButton(f"🎯 Цели недели", callback_data="show_weekly_goals")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Основной текст
-    text = (
-        f"{greeting}, {user.first_name}!\n\n"
-        f"🤖 DailyCheck Bot v4.0 - ваш AI помощник!\n\n"
-        f"📊 Уровень: {level_info[1]}\n"
-        f"⚡ XP: {user_data['xp']}\n"
-        f"🔥 Стрик: {user_data['streak']} дней\n"
-        f"✅ Сегодня выполнено: {user_data['completed_today']}\n\n"
-        f"🎨 Тема: {theme['name']}\n\n"
-        f"Выберите действие:"
-    )
-    
-    await update.message.reply_text(text, reply_markup=reply_markup)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Полная справка по всем командам"""
-    help_text = """
-📚 **DailyCheck Bot v4.0 - Полная справка**
-
-🔸 **Управление задачами:**
-• `/start` - Главное меню и интерактивный список задач
-• `/tasks` - Быстрый доступ к задачам
-• `/edit` - Редактировать список задач
-• `/settasks задача1; задача2` - Быстро установить список задач
-• `/addtask название [категория] [приоритет] [время]` - Добавить задачу
-• `/addsub <номер> подзадача` - Добавить подзадачу
-• `/reset` - Сбросить прогресс дня
-
-🔸 **AI-функции:**
-• `/ai_chat` - Включить/выключить AI-чат режим
-• `/motivate [текст]` - Получить мотивационное сообщение
-• `/ai_coach [вопрос]` - Персональный AI-коуч
-• `/psy [проблема]` - Консультация с AI-психологом
-• `/suggest_tasks [категория]` - AI предложит задачи
-
-🔸 **Статистика и аналитика:**
-• `/stats` - Детальная статистика
-• `/analytics` - Продвинутая аналитика
-• `/weekly_goals` - Еженедельные цели
-• `/set_weekly цель1; цель2` - Установить цели
-
-🔸 **Социальные функции:**
-• `/friends` - Список друзей
-• `/add_friend <ID>` - Добавить друга
-• `/myid` - Узнать свой ID
-
-🔸 **Утилиты:**
-• `/timer <минуты>` - Установить таймер
-• `/remind <минуты> <текст>` - Создать напоминание
-• `/export` - Экспорт данных
-• `/theme [номер]` - Сменить тему оформления
-• `/settings` - Настройки пользователя
-
-🔸 **Специальные режимы:**
-• `/dryon` - Начать отчет дней без алкоголя
-• `/dryoff` - Завершить отчет дней без алкоголя
-
-🔸 **Системные:**
-• `/health` - Состояние системы
-• `/ping` - Проверка работы бота
-• `/test` - Тестовая команда (админ)
-
-🔸 **Администрирование:**
-• `/broadcast <сообщение>` - Рассылка всем пользователям
-• `/stats_global` - Глобальная статистика
-
-💡 **Подсказки:**
-- Включите AI-чат режим (`/ai_chat`) для свободного общения
-- Используйте кнопки в `/start` для быстрой навигации
-- Добавляйте друзей для соревнований и мотивации
-- Устанавливайте еженедельные цели для лучших результатов
-
-🎮 **Геймификация:**
-- Получайте XP за выполнение задач
-- Открывайте новые достижения
-- Соревнуйтесь с друзьями
-- Поднимайтесь по уровням от Новичка до Божественного!
-"""
-    
-    await update.message.reply_text(help_text, parse_mode="Markdown")
-
-async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка работы бота"""
-    ping_text = (
-        f"🏓 Понг!\n\n"
-        f"✅ Бот: работает отлично\n"
-        f"🤖 AI: {'подключен' if OPENAI_API_KEY else 'недоступен'}\n"
-        f"👥 Пользователей: {global_stats['total_users']}\n"
-        f"📊 Команд выполнено: {global_stats['commands_executed']}\n"
-        f"🌐 Сервер: порт {PORT}\n"
-        f"⚡ Готов к работе!"
-    )
-    await update.message.reply_text(ping_text)
-
-# ===================== УПРАВЛЕНИЕ ЗАДАЧАМИ =====================
-
-async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Быстрый доступ к задачам"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/tasks")
-    
-    tasks = users_data[user_id]["tasks"]
-    if not tasks:
-        keyboard = [
-            [InlineKeyboardButton("➕ Добавить задачу", callback_data="add_task_dialog")],
-            [InlineKeyboardButton("📝 Быстрая установка", callback_data="quick_setup")]
+# ===== НАСТРОЙКА ЛОГИРОВАНИЯ =====
+def setup_logging():
+    """Настройка системы логирования"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('bot.log', encoding='utf-8')
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "📋 У вас пока нет задач.\n\n"
-            "Добавьте первую задачу и начните путь к продуктивности!",
-            reply_markup=reply_markup
-        )
-        return
-    
-    text = "📋 **Ваши задачи:**\n\n"
-    keyboard = []
-    
-    for i, task in enumerate(tasks):
-        status = "✅" if task.get("completed", False) else "⭕"
-        priority_emoji = PRIORITIES[task.get("priority", "medium")]["emoji"]
-        category_emoji = CATEGORIES[task.get("category", "personal")]["emoji"]
-        
-        text += f"{status} {i+1}. {task['name']}\n"
-        text += f"   {category_emoji} {priority_emoji}"
-        if task.get("estimate"):
-            text += f" ⏱️ {task['estimate']} мин"
-        
-        # Подзадачи
-        if task.get("subtasks"):
-            text += f"\n   📝 Подзадачи ({len(task['subtasks'])}):"
-            for j, subtask in enumerate(task["subtasks"]):
-                sub_status = "✅" if subtask.get("completed", False) else "⭕"
-                text += f"\n      {sub_status} {j+1}. {subtask['name']}"
-        
-        text += "\n\n"
-        
-        # Кнопки для незавершенных задач
-        if not task.get("completed", False):
-            keyboard.append([InlineKeyboardButton(f"✅ Задача {i+1}", callback_data=f"complete_task_{i}")])
-    
-    keyboard.extend([
-        [InlineKeyboardButton("➕ Добавить", callback_data="add_task_dialog"),
-         InlineKeyboardButton("✏️ Редактировать", callback_data="edit_tasks")],
-        [InlineKeyboardButton("🔄 Сбросить день", callback_data="reset_day")]
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-
-async def settasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Быстро установить список задач через точку с запятой"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/settasks")
-    
-    if not context.args:
-        await update.message.reply_text(
-            "📝 **Быстрая установка задач**\n\n"
-            "Формат: `/settasks задача1; задача2; задача3`\n\n"
-            "Пример:\n"
-            "`/settasks Проверить почту; Сделать зарядку; Прочитать 20 страниц книги`\n\n"
-            "💡 Задачи будут добавлены с категорией 'Личное' и средним приоритетом"
-        )
-        return
-    
-    tasks_text = " ".join(context.args)
-    task_names = [task.strip() for task in tasks_text.split(";") if task.strip()]
-    
-    if not task_names:
-        await update.message.reply_text("❌ Не найдено ни одной задачи. Проверьте формат!")
-        return
-    
-    # Очищаем старые задачи
-    users_data[user_id]["tasks"] = []
-    
-    # Добавляем новые задачи
-    for name in task_names:
-        task = {
-            "name": name,
-            "completed": False,
-            "created_at": datetime.now().isoformat(),
-            "category": "personal",
-            "priority": "medium",
-            "subtasks": []
-        }
-        users_data[user_id]["tasks"].append(task)
-        users_data[user_id]["total_tasks_created"] += 1
-    
-    xp_reward = len(task_names) * 5
-    xp_msg = add_xp(user_id, xp_reward)
-    achievements = check_achievements(user_id)
-    
-    save_user_data()
-    
-    response = f"✅ Добавлено {len(task_names)} задач!\n{xp_msg}"
-    if achievements:
-        response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-    
-    await update.message.reply_text(response)
-
-async def addtask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавить задачу с параметрами"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/addtask")
-    
-    if not context.args:
-        categories_text = "\n".join([f"• {key} - {cat['name']}" for key, cat in CATEGORIES.items()])
-        priorities_text = "\n".join([f"• {key} - {pri['name']}" for key, pri in PRIORITIES.items()])
-        
-        await update.message.reply_text(
-            f"➕ **Добавление задачи**\n\n"
-            f"Формат: `/addtask название [категория] [приоритет] [время]`\n\n"
-            f"Пример:\n"
-            f"`/addtask Написать отчет work high 60`\n\n"
-            f"📋 Категории:\n{categories_text}\n\n"
-            f"🎯 Приоритеты:\n{priorities_text}",
-            parse_mode="Markdown"
-        )
-        return
-    
-    args = context.args
-    name = args[0]
-    category = "personal"
-    priority = "medium"
-    estimate = None
-    
-    # Парсинг дополнительных параметров
-    if len(args) > 1:
-        for arg in args[1:]:
-            if arg.lower() in CATEGORIES:
-                category = arg.lower()
-            elif arg.lower() in PRIORITIES:
-                priority = arg.lower()
-            elif arg.isdigit():
-                estimate = int(arg)
-    
-    task = {
-        "name": name,
-        "completed": False,
-        "created_at": datetime.now().isoformat(),
-        "category": category,
-        "priority": priority,
-        "estimate": estimate,
-        "subtasks": []
-    }
-    
-    users_data[user_id]["tasks"].append(task)
-    users_data[user_id]["total_tasks_created"] += 1
-    
-    xp_msg = add_xp(user_id, 10)
-    achievements = check_achievements(user_id)
-    
-    save_user_data()
-    
-    cat_info = CATEGORIES[category]["name"]
-    pri_info = PRIORITIES[priority]["name"]
-    
-    response = f"✅ Задача добавлена!\n"
-    response += f"📝 {name}\n"
-    response += f"📂 {cat_info}\n"
-    response += f"🎯 {pri_info}\n"
-    if estimate:
-        response += f"⏱️ {estimate} минут\n"
-    response += f"\n{xp_msg}"
-    
-    if achievements:
-        response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-    
-    await update.message.reply_text(response)
-
-async def addsub_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавить подзадачу к существующей задаче"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/addsub")
-    
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "📝 **Добавление подзадачи**\n\n"
-            "Формат: `/addsub <номер_задачи> <название_подзадачи>`\n\n"
-            "Пример: `/addsub 1 Собрать материалы`\n\n"
-            "Используйте `/tasks` чтобы посмотреть номера задач"
-        )
-        return
-    
-    try:
-        task_number = int(context.args[0]) - 1
-        subtask_name = " ".join(context.args[1:])
-        
-        if task_number < 0 or task_number >= len(users_data[user_id]["tasks"]):
-            await update.message.reply_text("❌ Неверный номер задачи!")
-            return
-        
-        subtask = {
-            "name": subtask_name,
-            "completed": False,
-            "created_at": datetime.now().isoformat()
-        }
-        
-        users_data[user_id]["tasks"][task_number]["subtasks"].append(subtask)
-        
-        xp_msg = add_xp(user_id, 5)
-        save_user_data()
-        
-        task_name = users_data[user_id]["tasks"][task_number]["name"]
-        response = f"✅ Подзадача добавлена!\n"
-        response += f"📝 {subtask_name}\n"
-        response += f"📋 К задаче: {task_name}\n"
-        response += f"{xp_msg}"
-        
-        await update.message.reply_text(response)
-        
-    except ValueError:
-        await update.message.reply_text("❌ Номер задачи должен быть числом!")
-
-async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Редактировать список задач"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/edit")
-    
-    tasks = users_data[user_id]["tasks"]
-    if not tasks:
-        await update.message.reply_text("📋 Нет задач для редактирования. Добавьте задачи командой `/addtask`")
-        return
-    
-    keyboard = []
-    for i, task in enumerate(tasks):
-        status = "✅" if task.get("completed", False) else "⭕"
-        keyboard.append([InlineKeyboardButton(
-            f"{status} {i+1}. {task['name'][:30]}...", 
-            callback_data=f"edit_task_{i}"
-        )])
-    
-    keyboard.append([InlineKeyboardButton("🗑️ Удалить все задачи", callback_data="delete_all_tasks")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "✏️ **Редактирование задач**\n\nВыберите задачу для изменения:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
     )
+    
+    # Отключаем излишне подробные логи httpx
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+    
+    return logging.getLogger(__name__)
 
-async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сбросить прогресс дня"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/reset")
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Да, сбросить", callback_data="confirm_reset")],
-        [InlineKeyboardButton("❌ Отмена", callback_data="cancel_reset")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "🔄 **Сброс прогресса дня**\n\n"
-        "Это действие:\n"
-        "• Пометит все задачи как невыполненные\n"
-        "• Сбросит счетчик выполненных задач за день\n"
-        "• НЕ удалит ваши задачи\n\n"
-        "Вы уверены?",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+logger = setup_logging()
 
-# ===================== СТАТИСТИКА И АНАЛИТИКА =====================
+# ===== МОДЕЛИ ДАННЫХ =====
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Детальная статистика"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/stats")
-    
-    users_data[user_id]["stats_views"] += 1
-    user = users_data[user_id]
-    level_info = get_user_level(user["xp"])
-    
-    total_tasks = len(user["tasks"])
-    completed_tasks = sum(1 for task in user["tasks"] if task.get("completed", False))
-    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-    
-    # Статистика по категориям
-    category_stats = {}
-    for task in user["tasks"]:
-        cat_key = task.get("category", "personal")
-        cat_name = CATEGORIES[cat_key]["name"]
-        if cat_name not in category_stats:
-            category_stats[cat_name] = {"total": 0, "completed": 0}
-        category_stats[cat_name]["total"] += 1
-        if task.get("completed", False):
-            category_stats[cat_name]["completed"] += 1
-    
-    # Статистика по приоритетам
-    priority_stats = {}
-    for task in user["tasks"]:
-        pri_key = task.get("priority", "medium")
-        pri_name = PRIORITIES[pri_key]["name"]
-        if pri_name not in priority_stats:
-            priority_stats[pri_name] = {"total": 0, "completed": 0}
-        priority_stats[pri_name]["total"] += 1
-        if task.get("completed", False):
-            priority_stats[pri_name]["completed"] += 1
-    
-    text = f"📊 **Детальная статистика**\n\n"
-    text += f"👤 Уровень: {level_info[1]}\n"
-    text += f"⚡ XP: {user['xp']}/{(level_info[0] + 1) * 100}\n"
-    text += f"🔥 Стрик: {user['streak']} дней\n"
-    text += f"📋 Всего задач: {total_tasks}\n"
-    text += f"✅ Выполнено: {completed_tasks}\n"
-    text += f"📈 Процент выполнения: {completion_rate:.1f}%\n\n"
-    
-    if category_stats:
-        text += "📊 **По категориям:**\n"
-        for cat, stats in category_stats.items():
-            rate = (stats["completed"] / stats["total"] * 100) if stats["total"] > 0 else 0
-            text += f"{cat}: {stats['completed']}/{stats['total']} ({rate:.0f}%)\n"
-        text += "\n"
-    
-    if priority_stats:
-        text += "🎯 **По приоритетам:**\n"
-        for pri, stats in priority_stats.items():
-            rate = (stats["completed"] / stats["total"] * 100) if stats["total"] > 0 else 0
-            text += f"{pri}: {stats['completed']}/{stats['total']} ({rate:.0f}%)\n"
-        text += "\n"
-    
-    text += f"🏆 Достижений: {len(user_achievements[user_id])}/{len(ACHIEVEMENTS)}\n"
-    text += f"👥 Друзей: {len(user_friends[user_id])}\n"
-    text += f"⏰ Использовано таймеров: {user['timer_uses']}\n"
-    text += f"📊 Просмотров статистики: {user['stats_views']}\n"
-    
-    achievements = check_achievements(user_id)
-    if achievements:
-        text += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-    
-    save_user_data()
-    await update.message.reply_text(text, parse_mode="Markdown")
+class TaskStatus(Enum):
+    """Статусы задач"""
+    ACTIVE = "active"
+    COMPLETED = "completed" 
+    PAUSED = "paused"
+    ARCHIVED = "archived"
 
-async def analytics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Продвинутая аналитика"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/analytics")
-    
-    user = users_data[user_id]
-    
-    # Анализ продуктивности
-    text = f"📈 **Продвинутая аналитика**\n\n"
-    
-    # Рекомендуемые часы работы
-    productive_hours = ["9:00-12:00", "14:00-17:00", "19:00-21:00"]
-    text += f"⏰ **Рекомендуемые часы работы:**\n"
-    for hour in productive_hours:
-        text += f"   • {hour}\n"
-    
-    # Анализ XP роста
-    xp_per_day = user["xp"] / max(1, (datetime.now() - datetime.fromisoformat(user["created_at"])).days)
-    text += f"\n📊 **Анализ роста:**\n"
-    text += f"   • Средний XP в день: {xp_per_day:.1f}\n"
-    
-    # Прогноз следующего уровня
-    current_level = get_user_level(user["xp"])[0]
-    next_level_xp = (current_level + 1) * 100
-    xp_needed = next_level_xp - user["xp"]
-    days_to_next_level = xp_needed / max(1, xp_per_day)
-    
-    text += f"   • XP до следующего уровня: {xp_needed}\n"
-    text += f"   • Прогноз достижения: ~{days_to_next_level:.0f} дней\n"
-    
-    # Рекомендации
-    total_tasks = len(user["tasks"])
-    text += f"\n💡 **Персональные рекомендации:**\n"
-    
-    if total_tasks == 0:
-        text += f"   • Добавьте первые задачи для начала планирования\n"
-    elif total_tasks < 5:
-        text += f"   • Добавьте больше задач для лучшего планирования\n"
-    elif user["streak"] < 3:
-        text += f"   • Попробуйте выполнять задачи каждый день\n"
-    elif user["completed_today"] == 0:
-        text += f"   • Начните день с выполнения простой задачи\n"
-    else:
-        text += f"   • Отличная работа! Продолжайте в том же духе!\n"
-    
-    # AI рекомендации (если доступно)
-    if OPENAI_API_KEY:
-        text += f"   • Используйте `/ai_coach` для персональных советов\n"
-    
-    await update.message.reply_text(text, parse_mode="Markdown")
+class TaskPriority(Enum):
+    """Приоритеты задач"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
-# ===================== AI ФУНКЦИИ =====================
-
-async def generate_ai_response(text: str, user_id: int = None, ai_type: str = "general") -> str:
-    """Генерация AI ответов с fallback"""
-    global_stats["ai_requests"] += 1
+@dataclass
+class TaskCompletion:
+    """Запись о выполнении задачи"""
+    date: str  # ISO формат даты (YYYY-MM-DD)
+    completed: bool
+    note: Optional[str] = None
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     
-    if not OPENAI_API_KEY:
-        fallback_responses = {
-            "motivate": [
-                "🔥 Вы можете всё! Каждый маленький шаг приближает к большой цели!",
-                "💪 Сегодня отличный день для достижений!",
-                "🌟 Ваш потенциал безграничен! Продолжайте двигаться вперед!",
-                "🚀 Каждое завершенное дело - это победа! Празднуйте свои успехи!"
-            ],
-            "coach": [
-                "📋 Совет: Разбейте большую задачу на маленькие части и выполняйте по одной.",
-                "⏰ Используйте технику помодоро: 25 минут работы + 5 минут отдыха.",
-                "🎯 Начинайте день с самой важной задачи, пока энергия на пике.",
-                "📝 Записывайте все идеи и задачи, чтобы не держать их в голове."
-            ],
-            "psy": [
-                "🧠 Помните: неудачи - это опыт. Важно не падение, а умение подняться.",
-                "🌱 Стресс - это нормально. Важно найти здоровые способы с ним справляться.",
-                "💚 Будьте добры к себе. Самокритика должна быть конструктивной.",
-                "🔄 Изменения требуют времени. Будьте терпеливы к своему прогрессу."
-            ],
-            "general": [
-                f"💡 Я запомнил ваш вопрос: '{text}'. AI временно недоступен, но я готов помочь!",
-                "🤖 AI сервис недоступен, но вы можете использовать другие команды бота!",
-                "⚙️ Настройте OPENAI_API_KEY для полноценной работы AI функций."
+    def to_dict(self) -> dict:
+        return {
+            "date": self.date,
+            "completed": self.completed,
+            "note": self.note,
+            "timestamp": self.timestamp
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "TaskCompletion":
+        return cls(**data)
+
+@dataclass
+class Task:
+    """Модель задачи"""
+    task_id: str
+    user_id: int
+    title: str
+    description: Optional[str] = None
+    priority: str = "medium"
+    status: str = "active"
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    completions: List[TaskCompletion] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    is_daily: bool = True
+    reminder_time: Optional[str] = None
+    
+    @property
+    def current_streak(self) -> int:
+        """Текущая серия выполнения"""
+        if not self.completions:
+            return 0
+        
+        # Сортируем по дате (новые первые)
+        completed_dates = [
+            date.fromisoformat(c.date) for c in self.completions 
+            if c.completed
+        ]
+        completed_dates.sort(reverse=True)
+        
+        if not completed_dates:
+            return 0
+        
+        streak = 0
+        current_date = date.today()
+        
+        for comp_date in completed_dates:
+            if comp_date == current_date:
+                streak += 1
+                current_date = date.fromordinal(current_date.toordinal() - 1)
+            else:
+                break
+        
+        return streak
+    
+    @property
+    def completion_rate_week(self) -> float:
+        """Процент выполнения за последнюю неделю"""
+        week_ago = date.today() - timedelta(days=7)
+        week_completions = [
+            c for c in self.completions 
+            if date.fromisoformat(c.date) >= week_ago and c.completed
+        ]
+        return len(week_completions) / 7 * 100
+    
+    @property
+    def completion_rate_month(self) -> float:
+        """Процент выполнения за последний месяц"""
+        month_ago = date.today() - timedelta(days=30)
+        month_completions = [
+            c for c in self.completions 
+            if date.fromisoformat(c.date) >= month_ago and c.completed
+        ]
+        return len(month_completions) / 30 * 100
+    
+    def is_completed_today(self) -> bool:
+        """Проверка выполнения задачи сегодня"""
+        today = date.today().isoformat()
+        return any(c.date == today and c.completed for c in self.completions)
+    
+    def mark_completed(self, note: Optional[str] = None) -> bool:
+        """Отметить задачу как выполненную на сегодня"""
+        today = date.today().isoformat()
+        
+        # Проверяем, не выполнена ли уже сегодня
+        for completion in self.completions:
+            if completion.date == today:
+                completion.completed = True
+                completion.note = note
+                completion.timestamp = datetime.now().isoformat()
+                return True
+        
+        # Добавляем новую запись
+        self.completions.append(TaskCompletion(
+            date=today,
+            completed=True,
+            note=note
+        ))
+        return True
+    
+    def mark_uncompleted(self) -> bool:
+        """Отменить выполнение задачи на сегодня"""
+        today = date.today().isoformat()
+        
+        for completion in self.completions:
+            if completion.date == today:
+                completion.completed = False
+                completion.timestamp = datetime.now().isoformat()
+                return True
+        
+        return False
+    
+    def to_dict(self) -> dict:
+        """Сериализация в словарь"""
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "description": self.description,
+            "priority": self.priority,
+            "status": self.status,
+            "created_at": self.created_at,
+            "completions": [c.to_dict() for c in self.completions],
+            "tags": self.tags,
+            "is_daily": self.is_daily,
+            "reminder_time": self.reminder_time
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "Task":
+        """Десериализация из словаря"""
+        task = cls(
+            task_id=data["task_id"],
+            user_id=data["user_id"],
+            title=data["title"],
+            description=data.get("description"),
+            priority=data.get("priority", "medium"),
+            status=data.get("status", "active"),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+            tags=data.get("tags", []),
+            is_daily=data.get("is_daily", True),
+            reminder_time=data.get("reminder_time")
+        )
+        
+        # Восстанавливаем записи о выполнении
+        if "completions" in data:
+            task.completions = [
+                TaskCompletion.from_dict(c) if isinstance(c, dict) else c
+                for c in data["completions"]
             ]
-        }
-        return random.choice(fallback_responses.get(ai_type, fallback_responses["general"]))
-    
-    try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
-        system_prompts = {
-            "motivate": "Ты мотивационный коуч. Вдохновляй и поддерживай пользователя. Отвечай эмоционально и энергично.",
-            "coach": "Ты эксперт по продуктивности. Давай конкретные практические советы по планированию и выполнению задач.",
-            "psy": "Ты психолог-консультант. Помогай справляться со стрессом, находить баланс и решать эмоциональные проблемы.",
-            "general": "Ты полезный AI-ассистент для продуктивности. Отвечай кратко, полезно и дружелюбно."
-        }
-        
-        # Добавляем контекст пользователя
-        context = ""
-        if user_id and user_id in users_data:
-            user = users_data[user_id]
-            level_name = get_user_level(user['xp'])[1]
-            context = f" Контекст пользователя: уровень {level_name}, {user['xp']} XP, {len(user['tasks'])} задач, стрик {user['streak']} дней, выполнено сегодня {user['completed_today']}."
-        
-        response = await client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompts.get(ai_type, system_prompts["general"]) + context},
-                {"role": "user", "content": text}
-            ],
-            max_tokens=500,
-            temperature=0.7
-        )
-        
-        return f"🤖 {response.choices[0].message.content.strip()}"
-        
-    except Exception as e:
-        logger.error(f"AI ошибка: {e}")
-        return f"⚠️ Ошибка AI сервиса. Попробуйте позже!"
+        return task
 
-async def ai_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Включить/выключить AI-чат режим"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/ai_chat")
-    
-    user_ai_chat[user_id] = not user_ai_chat[user_id]
-    status = "включен" if user_ai_chat[user_id] else "выключен"
-    
-    text = f"🤖 **AI-чат режим {status}!**\n\n"
-    if user_ai_chat[user_id]:
-        text += "Теперь просто пишите мне сообщения, и я буду отвечать как AI-ассистент!\n\n"
-        text += "💡 **Примеры запросов:**\n"
-        text += "• \"Мотивируй меня\" - получите поддержку\n"
-        text += "• \"Как планировать день?\" - советы по продуктивности\n"
-        text += "• \"Устал от работы\" - психологическая поддержка\n"
-        text += "• \"Какие задачи добавить?\" - предложения задач\n"
-        text += "• \"Как дела?\" - анализ прогресса"
-    else:
-        text += "AI-чат выключен. Используйте команды для взаимодействия."
-    
-    save_user_data()
-    await update.message.reply_text(text, parse_mode="Markdown")
-
-async def motivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получить мотивационное сообщение"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/motivate")
-    
-    user_text = " ".join(context.args) if context.args else "мотивируй меня на продуктивный день"
-    response = await generate_ai_response(user_text, user_id, "motivate")
-    
-    # Добавляем персонализированную мотивацию
-    user = users_data[user_id]
-    level_name = get_user_level(user['xp'])[1]
-    
-    motivation_bonus = f"\n\n⚡ Ваш уровень {level_name} говорит о ваших способностях!"
-    if user['streak'] > 0:
-        motivation_bonus += f"\n🔥 Стрик {user['streak']} дней - впечатляющий результат!"
-    
-    await update.message.reply_text(response + motivation_bonus)
-
-async def ai_coach_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Персональный AI-коуч"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/ai_coach")
-    
-    user_text = " ".join(context.args) if context.args else "дай персональный совет по продуктивности"
-    response = await generate_ai_response(user_text, user_id, "coach")
-    await update.message.reply_text(response)
-
-async def psy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Консультация с AI-психологом"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/psy")
-    
-    user_text = " ".join(context.args) if context.args else "помоги справиться со стрессом и найти баланс"
-    response = await generate_ai_response(user_text, user_id, "psy")
-    await update.message.reply_text(response)
-
-async def suggest_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """AI предложит задачи"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/suggest_tasks")
-    
-    category = " ".join(context.args) if context.args else "продуктивность"
-    prompt = f"Предложи 5 полезных и конкретных задач для категории '{category}'"
-    response = await generate_ai_response(prompt, user_id, "coach")
-    await update.message.reply_text(response)
-
-# ===================== СОЦИАЛЬНЫЕ ФУНКЦИИ =====================
-
-async def friends_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список друзей"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/friends")
-    
-    friends = user_friends[user_id]
-    if not friends:
-        text = "👥 **У вас пока нет друзей.**\n\n"
-        text += "Используйте `/add_friend <ID>` чтобы добавить друга!\n"
-        text += "Узнать свой ID: `/myid`"
-    else:
-        text = "👥 **Ваши друзья:**\n\n"
-        for i, friend_id in enumerate(friends, 1):
-            if friend_id in users_data:
-                friend_data = users_data[friend_id]
-                level = get_user_level(friend_data["xp"])[1]
-                streak = friend_data["streak"]
-                text += f"{i}. ID {friend_id}\n"
-                text += f"   📊 {level} ({friend_data['xp']} XP)\n"
-                text += f"   🔥 Стрик: {streak} дней\n\n"
-        
-        text += f"📊 Сравните достижения с помощью `/compare <ID>`"
-    
-    await update.message.reply_text(text, parse_mode="Markdown")
-
-async def add_friend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавить друга"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/add_friend")
-    
-    if not context.args:
-        await update.message.reply_text(
-            "👥 **Добавление друга**\n\n"
-            "Формат: `/add_friend <ID_друга>`\n\n"
-            "Узнать свой ID: `/myid`\n"
-            "Друзья смогут видеть ваши достижения и соревноваться с вами!"
-        )
-        return
-    
-    try:
-        friend_id = int(context.args[0])
-        
-        if friend_id == user_id:
-            await update.message.reply_text("😅 Нельзя добавить себя в друзья!")
-            return
-        
-        if friend_id not in users_data:
-            await update.message.reply_text(
-                "❌ Пользователь не найден.\n"
-                "Попросите его сначала запустить бота командой /start"
-            )
-            return
-        
-        if friend_id in user_friends[user_id]:
-            await update.message.reply_text("👥 Этот пользователь уже в ваших друзьях!")
-            return
-        
-        # Взаимное добавление в друзья
-        user_friends[user_id].append(friend_id)
-        user_friends[friend_id].append(user_id)
-        
-        xp_msg = add_xp(user_id, 20)
-        achievements = check_achievements(user_id)
-        
-        save_user_data()
-        
-        friend_level = get_user_level(users_data[friend_id]["xp"])[1]
-        response = f"✅ Друг добавлен!\n"
-        response += f"👤 ID {friend_id} ({friend_level})\n"
-        response += f"{xp_msg}\n"
-        
-        if achievements:
-            response += f"🏆 Новые достижения: {', '.join(achievements)}"
-        
-        await update.message.reply_text(response)
-        
-    except ValueError:
-        await update.message.reply_text("❌ Неверный формат ID. Используйте числа.")
-
-async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Узнать свой ID"""
-    user_id = update.effective_user.id
-    user = update.effective_user
-    log_command(user_id, "/myid")
-    
-    level_info = get_user_level(users_data.get(user_id, {}).get("xp", 0))
-    
-    await update.message.reply_text(
-        f"🆔 **Ваша информация**\n\n"
-        f"👤 Имя: {user.first_name}\n"
-        f"🆔 ID: `{user_id}`\n"
-        f"📊 Уровень: {level_info[1]}\n\n"
-        f"Поделитесь этим ID с друзьями, чтобы они могли добавить вас!",
-        parse_mode="Markdown"
-    )
-
-# ===================== НАПОМИНАНИЯ И ТАЙМЕРЫ =====================
-
-async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Создать напоминание"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/remind")
-    
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "⏰ **Создание напоминания**\n\n"
-            "Формат: `/remind <время_в_минутах> <текст>`\n\n"
-            "Примеры:\n"
-            "• `/remind 30 Сделать перерыв`\n"
-            "• `/remind 60 Встреча с командой`\n"
-            "• `/remind 120 Обед`",
-            parse_mode="Markdown"
-        )
-        return
-    
-    try:
-        minutes = int(context.args[0])
-        reminder_text = " ".join(context.args[1:])
-        
-        if minutes <= 0:
-            await update.message.reply_text("❌ Время должно быть положительным числом!")
-            return
-        
-        reminder = {
-            "text": reminder_text,
-            "created_at": datetime.now().isoformat(),
-            "remind_at": (datetime.now() + timedelta(minutes=minutes)).isoformat(),
-            "minutes": minutes
-        }
-        
-        user_reminders[user_id].append(reminder)
-        save_user_data()
-        
-        await update.message.reply_text(
-            f"⏰ **Напоминание установлено!**\n\n"
-            f"📝 Текст: {reminder_text}\n"
-            f"⏱️ Через: {minutes} минут\n"
-            f"🕐 Время: {(datetime.now() + timedelta(minutes=minutes)).strftime('%H:%M')}\n\n"
-            f"💡 В полной версии с APScheduler напоминание придет автоматически"
-        )
-        
-    except ValueError:
-        await update.message.reply_text("❌ Время должно быть числом в минутах.")
-
-async def timer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Установить таймер"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/timer")
-    
-    if not context.args:
-        await update.message.reply_text(
-            "⏲️ **Таймер**\n\n"
-            "Формат: `/timer <минуты>`\n\n"
-            "Популярные таймеры:\n"
-            "• `/timer 25` - помодоро (работа)\n"
-            "• `/timer 5` - короткий перерыв\n"
-            "• `/timer 15` - длинный перерыв\n"
-            "• `/timer 60` - час концентрации",
-            parse_mode="Markdown"
-        )
-        return
-    
-    try:
-        minutes = int(context.args[0])
-        
-        if minutes <= 0:
-            await update.message.reply_text("❌ Время должно быть положительным числом!")
-            return
-        
-        users_data[user_id]["timer_uses"] += 1
-        xp_msg = add_xp(user_id, 5)
-        achievements = check_achievements(user_id)
-        
-        timer = {
-            "minutes": minutes,
-            "started_at": datetime.now().isoformat(),
-            "ends_at": (datetime.now() + timedelta(minutes=minutes)).isoformat()
-        }
-        
-        user_timers[user_id].append(timer)
-        save_user_data()
-        
-        # Определяем тип таймера
-        timer_type = "⏲️ Таймер"
-        if minutes == 25:
-            timer_type = "🍅 Помодоро"
-        elif minutes == 5:
-            timer_type = "☕ Короткий перерыв"
-        elif minutes == 15:
-            timer_type = "🛋️ Длинный перерыв"
-        
-        response = f"{timer_type} запущен на {minutes} минут!\n"
-        response += f"🕐 Завершится в: {(datetime.now() + timedelta(minutes=minutes)).strftime('%H:%M')}\n"
-        response += f"{xp_msg}"
-        
-        if achievements:
-            response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-        
-        await update.message.reply_text(response)
-        
-    except ValueError:
-        await update.message.reply_text("❌ Время должно быть числом в минутах.")
-
-# ===================== ЕЖЕНЕДЕЛЬНЫЕ ЦЕЛИ =====================
-
-async def weekly_goals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Управление еженедельными целями"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/weekly_goals")
-    
-    goals = users_data[user_id]["weekly_goals"]
-    if not goals:
-        keyboard = [
-            [InlineKeyboardButton("🎯 Установить цели", callback_data="set_weekly_goals")],
-            [InlineKeyboardButton("💡 Примеры целей", callback_data="example_goals")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "🎯 **У вас пока нет еженедельных целей.**\n\n"
-            "Еженедельные цели помогают:\n"
-            "• Планировать долгосрочные задачи\n"
-            "• Поддерживать мотивацию\n"
-            "• Отслеживать прогресс\n\n"
-            "Установите свои первые цели!",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        return
-    
-    text = "🎯 **Еженедельные цели:**\n\n"
-    keyboard = []
-    
-    for i, goal in enumerate(goals, 1):
-        status = "✅" if goal.get("completed", False) else "⭕"
-        progress = goal.get("progress", 0)
-        target = goal.get("target", 1)
-        
-        text += f"{status} {i}. {goal['name']}\n"
-        if target > 1:
-            text += f"   📊 Прогресс: {progress}/{target}\n"
-        text += f"   📅 Создана: {goal['created_at'][:10]}\n\n"
-        
-        if not goal.get("completed", False):
-            keyboard.append([InlineKeyboardButton(f"✅ Цель {i}", callback_data=f"complete_goal_{i-1}")])
-    
-    keyboard.extend([
-        [InlineKeyboardButton("➕ Добавить цель", callback_data="add_weekly_goal")],
-        [InlineKeyboardButton("🔄 Новая неделя", callback_data="reset_weekly_goals")]
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-
-async def set_weekly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Установить еженедельные цели"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/set_weekly")
-    
-    if not context.args:
-        await update.message.reply_text(
-            "🎯 **Еженедельные цели**\n\n"
-            "Формат: `/set_weekly цель1; цель2; цель3`\n\n"
-            "Примеры:\n"
-            "`/set_weekly Прочитать книгу; Сделать 5 тренировок; Изучить новую тему; Встретиться с друзьями`\n\n"
-            "💡 Цели заменят текущие еженедельные цели",
-            parse_mode="Markdown"
-        )
-        return
-    
-    goals_text = " ".join(context.args)
-    goal_names = [goal.strip() for goal in goals_text.split(";") if goal.strip()]
-    
-    if not goal_names:
-        await update.message.reply_text("❌ Не найдено ни одной цели. Проверьте формат!")
-        return
-    
-    # Заменяем старые цели
-    users_data[user_id]["weekly_goals"] = []
-    
-    for name in goal_names:
-        goal = {
-            "name": name,
-            "completed": False,
-            "created_at": datetime.now().isoformat(),
-            "progress": 0,
-            "target": 1
-        }
-        users_data[user_id]["weekly_goals"].append(goal)
-    
-    xp_reward = len(goal_names) * 10
-    xp_msg = add_xp(user_id, xp_reward)
-    achievements = check_achievements(user_id)
-    
-    save_user_data()
-    
-    response = f"🎯 Установлено {len(goal_names)} еженедельных целей!\n{xp_msg}"
-    if achievements:
-        response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-    
-    await update.message.reply_text(response)
-
-# ===================== ПЕРСОНАЛИЗАЦИЯ =====================
-
-async def theme_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сменить тему оформления"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/theme")
-    
-    if not context.args:
-        current_theme_key = user_themes[user_id]
-        current_theme = THEMES[current_theme_key]["name"]
-        
-        text = f"🎨 **Темы оформления**\n\n"
-        text += f"Текущая тема: {current_theme}\n\n"
-        text += "Доступные темы:\n"
-        
-        for i, (key, theme) in enumerate(THEMES.items(), 1):
-            marker = "▶️" if key == current_theme_key else f"{i}."
-            text += f"{marker} {theme['name']}\n"
-        
-        text += f"\nИспользуйте: `/theme <номер>`"
-        await update.message.reply_text(text, parse_mode="Markdown")
-        return
-    
-    try:
-        theme_num = int(context.args[0])
-        theme_keys = list(THEMES.keys())
-        
-        if 1 <= theme_num <= len(theme_keys):
-            new_theme_key = theme_keys[theme_num - 1]
-            user_themes[user_id] = new_theme_key
-            new_theme = THEMES[new_theme_key]
-            
-            xp_msg = add_xp(user_id, 5)
-            save_user_data()
-            
-            await update.message.reply_text(
-                f"🎨 Тема изменена на: {new_theme['name']}\n"
-                f"{new_theme['accent']} Новый стиль активирован!\n"
-                f"{xp_msg}"
-            )
-        else:
-            await update.message.reply_text(f"❌ Выберите номер от 1 до {len(THEMES)}")
-    except ValueError:
-        await update.message.reply_text("❌ Введите номер темы")
-
-async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@dataclass
+class UserSettings:
     """Настройки пользователя"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/settings")
+    timezone: str = "UTC"
+    language: str = "ru"
+    daily_reminder_time: str = "09:00"
+    reminder_enabled: bool = True
+    weekly_stats: bool = True
+    motivational_messages: bool = True
+    notification_sound: bool = True
+    auto_archive_completed: bool = False
     
-    user = users_data[user_id]
-    theme = THEMES[user_themes[user_id]]["name"]
-    ai_chat = user_ai_chat[user_id]
+    def to_dict(self) -> dict:
+        return {
+            "timezone": self.timezone,
+            "language": self.language,
+            "daily_reminder_time": self.daily_reminder_time,
+            "reminder_enabled": self.reminder_enabled,
+            "weekly_stats": self.weekly_stats,
+            "motivational_messages": self.motivational_messages,
+            "notification_sound": self.notification_sound,
+            "auto_archive_completed": self.auto_archive_completed
+        }
     
-    text = f"⚙️ **Настройки пользователя**\n\n"
-    text += f"🎨 Тема: {theme}\n"
-    text += f"🤖 AI-чат: {'включен' if ai_chat else 'выключен'}\n"
-    text += f"🚭 Dry режим: {'включен' if user['dry_mode'] else 'выключен'}\n"
-    text += f"📅 Регистрация: {user['created_at'][:10]}\n"
-    text += f"📊 Уровень: {get_user_level(user['xp'])[1]}\n"
-    text += f"⚡ XP: {user['xp']}\n"
-    text += f"🔥 Стрик: {user['streak']} дней\n\n"
-    
-    text += "**Команды для изменения:**\n"
-    text += "• `/theme` - сменить тему\n"
-    text += "• `/ai_chat` - переключить AI-чат\n"
-    text += "• `/dryon` или `/dryoff` - dry режим\n"
-    text += "• `/export` - экспорт ваших данных"
-    
-    keyboard = [
-        [InlineKeyboardButton("🎨 Сменить тему", callback_data="change_theme")],
-        [InlineKeyboardButton("🤖 Переключить AI", callback_data="toggle_ai")],
-        [InlineKeyboardButton("📤 Экспорт данных", callback_data="export_data")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    @classmethod
+    def from_dict(cls, data: dict) -> "UserSettings":
+        return cls(**data)
 
-# ===================== ЭКСПОРТ И УТИЛИТЫ =====================
-
-async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Экспорт данных"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/export")
+@dataclass
+class UserStats:
+    """Статистика пользователя"""
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    current_streak: int = 0
+    longest_streak: int = 0
+    last_activity: Optional[str] = None
+    registration_date: str = field(default_factory=lambda: datetime.now().isoformat())
+    total_session_time: int = 0  # в секундах
+    preferred_time_of_day: str = "morning"  # morning, afternoon, evening
     
-    user_data = {
-        "user_info": {
-            "user_id": user_id,
-            "level": get_user_level(users_data[user_id]["xp"])[1],
-            "xp": users_data[user_id]["xp"],
-            "streak": users_data[user_id]["streak"],
-            "created_at": users_data[user_id]["created_at"],
-            "theme": THEMES[user_themes[user_id]]["name"]
+    @property
+    def completion_rate(self) -> float:
+        """Процент выполнения задач"""
+        if self.total_tasks == 0:
+            return 0.0
+        return (self.completed_tasks / self.total_tasks) * 100
+    
+    @property
+    def days_since_registration(self) -> int:
+        """Дней с момента регистрации"""
+        try:
+            reg_date = datetime.fromisoformat(self.registration_date)
+            return (datetime.now() - reg_date).days
+        except:
+            return 0
+    
+    def to_dict(self) -> dict:
+        return {
+            "total_tasks": self.total_tasks,
+            "completed_tasks": self.completed_tasks,
+            "current_streak": self.current_streak,
+            "longest_streak": self.longest_streak,
+            "last_activity": self.last_activity,
+            "registration_date": self.registration_date,
+            "total_session_time": self.total_session_time,
+            "preferred_time_of_day": self.preferred_time_of_day
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "UserStats":
+        return cls(**data)
+
+@dataclass
+class Achievement:
+    """Модель достижения"""
+    achievement_id: str
+    title: str
+    description: str
+    icon: str
+    earned_at: Optional[str] = None
+    progress: int = 0
+    target: int = 1
+    
+    @property
+    def is_earned(self) -> bool:
+        return self.earned_at is not None
+    
+    @property
+    def progress_percentage(self) -> float:
+        return (self.progress / self.target) * 100 if self.target > 0 else 100
+
+@dataclass
+class User:
+    """Модель пользователя"""
+    user_id: int
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    settings: UserSettings = field(default_factory=UserSettings)
+    stats: UserStats = field(default_factory=UserStats)
+    tasks: Dict[str, Task] = field(default_factory=dict)
+    achievements: List[str] = field(default_factory=list)
+    notes: str = ""  # Личные заметки пользователя
+    
+    @property
+    def display_name(self) -> str:
+        """Отображаемое имя пользователя"""
+        if self.first_name:
+            return self.first_name
+        elif self.username:
+            return f"@{self.username}"
+        else:
+            return f"Пользователь {self.user_id}"
+    
+    @property
+    def active_tasks(self) -> Dict[str, Task]:
+        """Активные задачи"""
+        return {k: v for k, v in self.tasks.items() if v.status == "active"}
+    
+    @property
+    def completed_tasks_today(self) -> List[Task]:
+        """Задачи, выполненные сегодня"""
+        return [task for task in self.tasks.values() if task.is_completed_today()]
+    
+    def update_activity(self):
+        """Обновить время последней активности"""
+        self.stats.last_activity = datetime.now().isoformat()
+    
+    def to_dict(self) -> dict:
+        """Сериализация в словарь"""
+        return {
+            "user_id": self.user_id,
+            "username": self.username,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "settings": self.settings.to_dict(),
+            "stats": self.stats.to_dict(),
+            "tasks": {k: v.to_dict() for k, v in self.tasks.items()},
+            "achievements": self.achievements,
+            "notes": self.notes
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "User":
+        """Десериализация из словаря"""
+        user = cls(
+            user_id=data["user_id"],
+            username=data.get("username"),
+            first_name=data.get("first_name"),
+            last_name=data.get("last_name"),
+            notes=data.get("notes", "")
+        )
+        
+        # Восстанавливаем настройки
+        if "settings" in data:
+            user.settings = UserSettings.from_dict(data["settings"])
+        
+        # Восстанавливаем статистику
+        if "stats" in data:
+            user.stats = UserStats.from_dict(data["stats"])
+        
+        # Восстанавливаем задачи
+        if "tasks" in data:
+            user.tasks = {k: Task.from_dict(v) for k, v in data["tasks"].items()}
+        
+        # Восстанавливаем достижения
+        user.achievements = data.get("achievements", [])
+        
+        return user
+
+# ===== БАЗА ДАННЫХ =====
+
+class DatabaseManager:
+    """Менеджер файловой базы данных"""
+    
+    def __init__(self, data_file: str = "users_data.json"):
+        self.data_file = Path(data_file)
+        self.users_cache: Dict[int, User] = {}
+        self.backup_dir = Path("backups")
+        self.backup_dir.mkdir(exist_ok=True)
+        self._load_all_users()
+    
+    def _load_all_users(self):
+        """Загрузка всех пользователей из файла"""
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                for user_id_str, user_data in data.items():
+                    try:
+                        user_id = int(user_id_str)
+                        user = User.from_dict(user_data)
+                        self.users_cache[user_id] = user
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка загрузки пользователя {user_id_str}: {e}")
+                
+                logger.info(f"📂 Загружено {len(self.users_cache)} пользователей")
+            else:
+                logger.info("📂 Файл данных не найден, начинаем с пустой базы")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки данных: {e}")
+            self.users_cache = {}
+    
+    def save_all_users(self) -> bool:
+        """Сохранение всех пользователей в файл"""
+        try:
+            # Создаем резервную копию перед сохранением
+            if self.data_file.exists():
+                backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                backup_path = self.backup_dir / backup_name
+                self.data_file.replace(backup_path)
+            
+            # Сохраняем данные
+            data = {}
+            for user_id, user in self.users_cache.items():
+                data[str(user_id)] = user.to_dict()
+            
+            # Атомарное сохранение через временный файл
+            temp_file = self.data_file.with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            temp_file.replace(self.data_file)
+            logger.info("💾 Данные сохранены")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения: {e}")
+            return False
+    
+    def get_user(self, user_id: int) -> Optional[User]:
+        """Получить пользователя по ID"""
+        return self.users_cache.get(user_id)
+    
+    def get_or_create_user(self, user_id: int, **kwargs) -> User:
+        """Получить пользователя или создать нового"""
+        if user_id not in self.users_cache:
+            user = User(
+                user_id=user_id,
+                username=kwargs.get('username'),
+                first_name=kwargs.get('first_name'),
+                last_name=kwargs.get('last_name')
+            )
+            self.users_cache[user_id] = user
+            logger.info(f"👤 Создан новый пользователь: {user.display_name}")
+        
+        # Обновляем данные пользователя и активность
+        user = self.users_cache[user_id]
+        user.username = kwargs.get('username', user.username)
+        user.first_name = kwargs.get('first_name', user.first_name)
+        user.last_name = kwargs.get('last_name', user.last_name)
+        user.update_activity()
+        
+        return user
+    
+    def get_all_users(self) -> List[User]:
+        """Получить всех пользователей"""
+        return list(self.users_cache.values())
+    
+    def get_users_count(self) -> int:
+        """Получить количество пользователей"""
+        return len(self.users_cache)
+    
+    def cleanup_old_backups(self, keep_count: int = 10):
+        """Удаление старых резервных копий"""
+        try:
+            backups = list(self.backup_dir.glob("backup_*.json"))
+            if len(backups) > keep_count:
+                backups.sort(key=lambda x: x.stat().st_mtime)
+                for backup in backups[:-keep_count]:
+                    backup.unlink()
+                logger.info(f"🗑️ Удалено {len(backups) - keep_count} старых бэкапов")
+        except Exception as e:
+            logger.error(f"❌ Ошибка очистки бэкапов: {e}")
+
+# ===== СИСТЕМА ДОСТИЖЕНИЙ =====
+
+class AchievementSystem:
+    """Система достижений"""
+    
+    ACHIEVEMENTS = {
+        'first_task': {
+            'title': 'Первые шаги',
+            'description': 'Создайте свою первую задачу',
+            'icon': '🎯',
+            'condition': lambda user: len(user.tasks) >= 1
         },
-        "tasks": users_data[user_id]["tasks"],
-        "achievements": [ACHIEVEMENTS[i] for i in user_achievements[user_id]],
-        "weekly_goals": users_data[user_id]["weekly_goals"],
-        "statistics": {
-            "total_tasks_created": users_data[user_id]["total_tasks_created"],
-            "total_tasks_completed": users_data[user_id]["total_tasks_completed"],
-            "completed_today": users_data[user_id]["completed_today"],
-            "timer_uses": users_data[user_id]["timer_uses"],
-            "stats_views": users_data[user_id]["stats_views"]
+        'streak_3': {
+            'title': 'Начинающий',
+            'description': 'Поддерживайте streak 3 дня',
+            'icon': '🔥',
+            'condition': lambda user: max([task.current_streak for task in user.tasks.values()] + [0]) >= 3
         },
-        "social": {
-            "friends_count": len(user_friends[user_id]),
-            "friends_list": user_friends[user_id]
+        'streak_7': {
+            'title': 'Неделя силы',
+            'description': 'Поддерживайте streak 7 дней',
+            'icon': '💪',
+            'condition': lambda user: max([task.current_streak for task in user.tasks.values()] + [0]) >= 7
         },
-        "export_info": {
-            "export_date": datetime.now().isoformat(),
-            "bot_version": "4.0",
-            "format": "JSON"
+        'streak_30': {
+            'title': 'Мастер привычек',
+            'description': 'Поддерживайте streak 30 дней',
+            'icon': '💎',
+            'condition': lambda user: max([task.current_streak for task in user.tasks.values()] + [0]) >= 30
+        },
+        'streak_100': {
+            'title': 'Легенда',
+            'description': 'Поддерживайте streak 100 дней',
+            'icon': '👑',
+            'condition': lambda user: max([task.current_streak for task in user.tasks.values()] + [0]) >= 100
+        },
+        'tasks_10': {
+            'title': 'Продуктивный',
+            'description': 'Выполните 10 задач',
+            'icon': '📈',
+            'condition': lambda user: user.stats.completed_tasks >= 10
+        },
+        'tasks_50': {
+            'title': 'Энтузиаст',
+            'description': 'Выполните 50 задач',
+            'icon': '🏆',
+            'condition': lambda user: user.stats.completed_tasks >= 50
+        },
+        'tasks_100': {
+            'title': 'Чемпион',
+            'description': 'Выполните 100 задач',
+            'icon': '🌟',
+            'condition': lambda user: user.stats.completed_tasks >= 100
+        },
+        'tasks_500': {
+            'title': 'Мастер продуктивности',
+            'description': 'Выполните 500 задач',
+            'icon': '⭐',
+            'condition': lambda user: user.stats.completed_tasks >= 500
+        },
+        'perfect_week': {
+            'title': 'Идеальная неделя',
+            'description': 'Выполните все задачи 7 дней подряд',
+            'icon': '✨',
+            'condition': lambda user: user._check_perfect_week()
         }
     }
     
-    # Создание JSON файла (в памяти)
-    json_data = json.dumps(user_data, ensure_ascii=False, indent=2)
-    
-    # Создание CSV данных для задач
-    csv_output = StringIO()
-    csv_writer = csv.writer(csv_output)
-    csv_writer.writerow(["Название", "Статус", "Категория", "Приоритет", "Время создания", "Подзадачи"])
-    
-    for task in users_data[user_id]["tasks"]:
-        status = "Выполнено" if task.get("completed", False) else "В процессе"
-        category = CATEGORIES[task.get("category", "personal")]["name"]
-        priority = PRIORITIES[task.get("priority", "medium")]["name"]
-        subtasks_count = len(task.get("subtasks", []))
+    @classmethod
+    def check_achievements(cls, user: User) -> List[str]:
+        """Проверка новых достижений пользователя"""
+        new_achievements = []
         
-        csv_writer.writerow([
-            task["name"],
-            status,
-            category,
-            priority,
-            task["created_at"][:10],
-            subtasks_count
+        for achievement_id, achievement_data in cls.ACHIEVEMENTS.items():
+            if achievement_id not in user.achievements:
+                try:
+                    if achievement_data['condition'](user):
+                        user.achievements.append(achievement_id)
+                        new_achievements.append(achievement_id)
+                        logger.info(f"🏆 Пользователь {user.user_id} получил достижение: {achievement_id}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка проверки достижения {achievement_id}: {e}")
+        
+        return new_achievements
+    
+    @classmethod
+    def get_achievement_message(cls, achievement_id: str) -> str:
+        """Получить сообщение о достижении"""
+        if achievement_id not in cls.ACHIEVEMENTS:
+            return "🏆 Новое достижение получено!"
+        
+        achievement = cls.ACHIEVEMENTS[achievement_id]
+        return f"🏆 **Новое достижение!**\n\n{achievement['icon']} **{achievement['title']}**\n{achievement['description']}"
+
+# Добавляем метод для проверки идеальной недели
+def _check_perfect_week(self) -> bool:
+    """Проверка идеальной недели (все задачи выполнены 7 дней подряд)"""
+    if not self.tasks:
+        return False
+    
+    today = date.today()
+    for i in range(7):
+        check_date = today - timedelta(days=i)
+        daily_tasks = [task for task in self.tasks.values() if task.status == "active"]
+        
+        if not daily_tasks:
+            return False
+        
+        completed_that_day = [
+            task for task in daily_tasks 
+            if any(c.date == check_date.isoformat() and c.completed for c in task.completions)
+        ]
+        
+        if len(completed_that_day) != len(daily_tasks):
+            return False
+    
+    return True
+
+# Добавляем метод к классу User
+User._check_perfect_week = _check_perfect_week
+
+# ===== КЛАВИАТУРЫ И ИНТЕРФЕЙС =====
+
+class KeyboardManager:
+    """Менеджер клавиатур и интерфейса"""
+    
+    @staticmethod
+    def get_main_keyboard() -> ReplyKeyboardMarkup:
+        """Основная клавиатура"""
+        keyboard = [
+            [KeyboardButton("📝 Мои задачи"), KeyboardButton("➕ Добавить задачу")],
+            [KeyboardButton("✅ Отметить выполнение"), KeyboardButton("📊 Статистика")],
+            [KeyboardButton("🏆 Достижения"), KeyboardButton("🔥 Лидерборд")],
+            [KeyboardButton("⚙️ Настройки"), KeyboardButton("ℹ️ Помощь")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    @staticmethod
+    def get_tasks_inline_keyboard(tasks: Dict[str, Task]) -> InlineKeyboardMarkup:
+        """Инлайн клавиатура для списка задач"""
+        keyboard = []
+        
+        for task_id, task in list(tasks.items())[:10]:  # Ограничиваем до 10 задач
+            status_emoji = "✅" if task.is_completed_today() else "⭕"
+            streak_info = f" 🔥{task.current_streak}" if task.current_streak > 0 else ""
+            
+            button_text = f"{status_emoji} {task.title[:25]}{streak_info}"
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"task_view_{task_id}")
+            ])
+        
+        # Кнопки действий
+        action_buttons = []
+        if len(tasks) > 10:
+            action_buttons.append(InlineKeyboardButton("📋 Больше задач", callback_data="tasks_more"))
+        
+        action_buttons.extend([
+            InlineKeyboardButton("➕ Добавить", callback_data="task_add"),
+            InlineKeyboardButton("🔄 Обновить", callback_data="tasks_refresh")
         ])
-    
-    csv_data = csv_output.getvalue()
-    csv_output.close()
-    
-    # Статистика экспорта
-    stats_text = (
-        f"📤 **Экспорт данных завершен**\n\n"
-        f"📊 **Ваша статистика:**\n"
-        f"📋 Задач: {len(user_data['tasks'])}\n"
-        f"🏆 Достижений: {len(user_data['achievements'])}\n"
-        f"🎯 Еженедельных целей: {len(user_data['weekly_goals'])}\n"
-        f"👥 Друзей: {user_data['social']['friends_count']}\n"
-        f"⚡ XP: {user_data['user_info']['xp']}\n"
-        f"📊 Уровень: {user_data['user_info']['level']}\n\n"
-        f"📁 **Доступные форматы:**\n"
-        f"• JSON - полные данные\n"
-        f"• CSV - таблица задач\n\n"
-        f"💾 В полной версии файлы будут отправлены в чат"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("📄 Показать JSON", callback_data="show_json")],
-        [InlineKeyboardButton("📊 Показать CSV", callback_data="show_csv")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Сохраняем данные для отображения по кнопкам
-    users_data[user_id]["export_json"] = json_data[:2000]  # Ограничиваем для отображения
-    users_data[user_id]["export_csv"] = csv_data[:2000]
-    
-    await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode="Markdown")
-
-async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверить состояние системы"""
-    user_id = update.effective_user.id
-    log_command(user_id, "/health")
-    
-    # Проверка различных компонентов
-    system_status = "✅ Отлично"
-    ai_status = "✅ Подключен" if OPENAI_API_KEY else "❌ Недоступен"
-    
-    # Статистика использования
-    total_tasks_all_users = sum(len(user.get("tasks", [])) for user in users_data.values())
-    active_users = len([u for u in users_data.values() if len(u.get("tasks", [])) > 0])
-    
-    await update.message.reply_text(
-        f"🏥 **Состояние системы**\n\n"
-        f"🤖 Бот: {system_status}\n"
-        f"🧠 AI: {ai_status}\n"
-        f"🌐 HTTP сервер: порт {PORT}\n"
-        f"💾 Данные: сохраняются\n\n"
-        f"📊 **Статистика:**\n"
-        f"👥 Всего пользователей: {global_stats['total_users']}\n"
-        f"🎯 Активных пользователей: {active_users}\n"
-        f"📋 Всего задач: {total_tasks_all_users}\n"
-        f"📊 Команд выполнено: {global_stats['commands_executed']}\n"
-        f"🤖 AI запросов: {global_stats['ai_requests']}\n\n"
-        f"⏰ Время сервера: {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}\n"
-        f"🔄 Версия: 4.0 (FULL)",
-        parse_mode="Markdown"
-    )
-
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Тестовая команда (для отладки)"""
-    user_id = update.effective_user.id
-    log_command(user_id, "/test")
-    
-    if user_id != ADMIN_USER_ID and ADMIN_USER_ID != 0:
-        await update.message.reply_text("❌ Доступно только администратору")
-        return
-    
-    # Создание тестовых данных
-    test_tasks = [
-        {"name": "Тестовая задача - Работа", "completed": True, "category": "work", "priority": "high"},
-        {"name": "Тестовая задача - Здоровье", "completed": False, "category": "health", "priority": "medium"},
-        {"name": "Тестовая задача - Обучение", "completed": True, "category": "study", "priority": "low"},
-        {"name": "Задача с подзадачами", "completed": False, "category": "personal", "priority": "medium", 
-         "subtasks": [
-             {"name": "Подзадача 1", "completed": True},
-             {"name": "Подзадача 2", "completed": False}
-         ]}
-    ]
-    
-    # Добавляем тестовые данные
-    users_data[user_id]["tasks"].extend(test_tasks)
-    users_data[user_id]["total_tasks_created"] += len(test_tasks)
-    users_data[user_id]["completed_today"] += 2
-    users_data[user_id]["streak"] = 5
-    users_data[user_id]["timer_uses"] += 3
-    
-    # Добавляем тестовые цели
-    test_goals = [
-        {"name": "Тестовая цель 1", "completed": True, "created_at": datetime.now().isoformat()},
-        {"name": "Тестовая цель 2", "completed": False, "created_at": datetime.now().isoformat()}
-    ]
-    users_data[user_id]["weekly_goals"].extend(test_goals)
-    
-    # Даем XP
-    add_xp(user_id, 150)
-    
-    # Проверяем достижения
-    achievements = check_achievements(user_id)
-    
-    save_user_data()
-    
-    response = "🧪 **Тестовые данные добавлены!**\n\n"
-    response += f"📋 Добавлено {len(test_tasks)} задач\n"
-    response += f"🎯 Добавлено {len(test_goals)} целей\n"
-    response += f"⚡ Добавлено 150 XP\n"
-    response += f"🔥 Стрик установлен на 5 дней\n"
-    
-    if achievements:
-        response += f"\n🏆 Получены достижения: {', '.join(achievements)}"
-    
-    await update.message.reply_text(response, parse_mode="Markdown")
-
-# ===================== РЕЖИМ "DRY" =====================
-
-async def dryon_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начать отчет дней без алкоголя"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/dryon")
-    
-    if users_data[user_id]["dry_mode"]:
-        days = users_data[user_id]["dry_days"]
-        await update.message.reply_text(
-            f"🚭 Режим 'Dry' уже активен!\n"
-            f"Текущий счетчик: {days} дней"
-        )
-        return
-    
-    users_data[user_id]["dry_mode"] = True
-    users_data[user_id]["dry_days"] = 0
-    save_user_data()
-    
-    await update.message.reply_text(
-        "🚭 **Режим 'Dry' включен!**\n\n"
-        "Отслеживание дней без алкоголя начато.\n"
-        "Каждый день стойкости будет приносить дополнительные XP!\n\n"
-        "💪 Вы можете это сделать!\n"
-        "Используйте `/dryoff` для завершения отчета.",
-        parse_mode="Markdown"
-    )
-
-async def dryoff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Завершить отчет дней без алкоголя"""
-    user_id = update.effective_user.id
-    init_user(user_id)
-    log_command(user_id, "/dryoff")
-    
-    if not users_data[user_id]["dry_mode"]:
-        await update.message.reply_text("🚭 Режим 'Dry' не активен. Используйте `/dryon` для начала.")
-        return
-    
-    days = users_data[user_id]["dry_days"]
-    users_data[user_id]["dry_mode"] = False
-    
-    # Награда за dry дни
-    xp_reward = days * 10
-    if days >= 7:
-        xp_reward += 50  # Бонус за неделю
-    if days >= 30:
-        xp_reward += 100  # Бонус за месяц
-    
-    xp_msg = add_xp(user_id, xp_reward)
-    save_user_data()
-    
-    # Мотивационное сообщение в зависимости от результата
-    if days == 0:
-        message = "Начало положено! В следующий раз получится лучше."
-    elif days < 7:
-        message = "Хороший старт! Каждый день - это достижение."
-    elif days < 30:
-        message = "Впечатляющий результат! Вы показали силу воли."
-    else:
-        message = "Невероятно! Вы настоящий чемпион силы воли!"
-    
-    await update.message.reply_text(
-        f"🚭 **Отчет завершен!**\n\n"
-        f"📊 Дней без алкоголя: {days}\n"
-        f"🎁 Награда: {xp_reward} XP\n"
-        f"💪 {message}\n\n"
-        f"{xp_msg}",
-        parse_mode="Markdown"
-    )
-
-# ===================== АДМИНСКИЕ ФУНКЦИИ =====================
-
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправление сообщения всем активным чатам"""
-    user_id = update.effective_user.id
-    log_command(user_id, "/broadcast")
-    
-    if user_id != ADMIN_USER_ID and ADMIN_USER_ID != 0:
-        await update.message.reply_text("❌ Доступно только администратору")
-        return
-    
-    if not context.args:
-        await update.message.reply_text(
-            "📢 **Рассылка сообщений**\n\n"
-            "Формат: `/broadcast <сообщение>`\n\n"
-            "Пример: `/broadcast Обновление бота! Добавлены новые функции.`"
-        )
-        return
-    
-    message = " ".join(context.args)
-    sent_count = 0
-    failed_count = 0
-    
-    await update.message.reply_text(f"📢 Начинаю рассылку для {len(users_data)} пользователей...")
-    
-    for target_user_id in users_data.keys():
-        try:
-            await context.bot.send_message(
-                target_user_id, 
-                f"📢 **Сообщение от администратора:**\n\n{message}",
-                parse_mode="Markdown"
-            )
-            sent_count += 1
-        except Exception as e:
-            failed_count += 1
-            logger.warning(f"Не удалось отправить сообщение пользователю {target_user_id}: {e}")
-    
-    await update.message.reply_text(
-        f"📢 **Рассылка завершена**\n\n"
-        f"✅ Отправлено: {sent_count}\n"
-        f"❌ Ошибок: {failed_count}\n"
-        f"📊 Успешность: {(sent_count/(sent_count+failed_count)*100):.1f}%"
-    )
-
-async def stats_global_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Глобальная статистика по всем пользователям"""
-    user_id = update.effective_user.id
-    log_command(user_id, "/stats_global")
-    
-    if user_id != ADMIN_USER_ID and ADMIN_USER_ID != 0:
-        await update.message.reply_text("❌ Доступно только администратору")
-        return
-    
-    # Подсчет глобальной статистики
-    total_tasks = sum(len(user.get("tasks", [])) for user in users_data.values())
-    total_completed = sum(
-        sum(1 for task in user.get("tasks", []) if task.get("completed", False))
-        for user in users_data.values()
-    )
-    total_xp = sum(user.get("xp", 0) for user in users_data.values())
-    active_users = len([u for u in users_data.values() if len(u.get("tasks", [])) > 0])
-    
-    # Статистика по уровням
-    level_stats = {}
-    for user in users_data.values():
-        level = get_user_level(user.get("xp", 0))[1]
-        level_stats[level] = level_stats.get(level, 0) + 1
-    
-    # Топ пользователи по XP
-    top_users = sorted(
-        [(uid, user.get("xp", 0)) for uid, user in users_data.items()],
-        key=lambda x: x[1], reverse=True
-    )[:5]
-    
-    text = f"📊 **Глобальная статистика**\n\n"
-    text += f"👥 **Пользователи:**\n"
-    text += f"   • Всего: {global_stats['total_users']}\n"
-    text += f"   • Активных: {active_users}\n\n"
-    
-    text += f"📋 **Задачи:**\n"
-    text += f"   • Всего создано: {total_tasks}\n"
-    text += f"   • Выполнено: {total_completed}\n"
-    text += f"   • Процент выполнения: {(total_completed/max(1,total_tasks)*100):.1f}%\n\n"
-    
-    text += f"⚡ **Активность:**\n"
-    text += f"   • Общий XP: {total_xp:,}\n"
-    text += f"   • Команд выполнено: {global_stats['commands_executed']:,}\n"
-    text += f"   • AI запросов: {global_stats['ai_requests']:,}\n\n"
-    
-    text += f"🏆 **Топ-5 по XP:**\n"
-    for i, (uid, xp) in enumerate(top_users, 1):
-        level = get_user_level(xp)[1]
-        text += f"   {i}. ID{uid}: {xp} XP ({level})\n"
-    
-    text += f"\n📈 **Статистика по уровням:**\n"
-    for level, count in sorted(level_stats.items(), key=lambda x: LEVELS.index(x[0]) if x[0] in LEVELS else 999):
-        text += f"   • {level}: {count} чел.\n"
-    
-    await update.message.reply_text(text, parse_mode="Markdown")
-
-# ===================== ОБРАБОТКА СООБЩЕНИЙ =====================
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка обычных сообщений"""
-    user_id = update.effective_user.id
-    user_text = update.message.text
-    init_user(user_id)
-    
-    logger.info(f"Сообщение от {user_id}: {user_text[:50]}...")
-    
-    # Если включен AI-чат режим
-    if user_ai_chat.get(user_id, False):
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # Определяем тип запроса для AI
-        text_lower = user_text.lower()
-        if any(word in text_lower for word in ["мотив", "поддерж", "вдохнов", "силы", "могу"]):
-            ai_type = "motivate"
-        elif any(word in text_lower for word in ["планир", "продуктив", "задач", "советы", "как"]):
-            ai_type = "coach"
-        elif any(word in text_lower for word in ["стресс", "устал", "грустн", "плох", "депресс"]):
-            ai_type = "psy"
+        keyboard.append(action_buttons)
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def get_task_actions_keyboard(task_id: str, is_completed_today: bool = False) -> InlineKeyboardMarkup:
+        """Клавиатура действий с задачей"""
+        keyboard = []
+        
+        if is_completed_today:
+            keyboard.append([
+                InlineKeyboardButton("❌ Отменить выполнение", callback_data=f"uncomplete_{task_id}")
+            ])
         else:
-            ai_type = "general"
+            keyboard.append([
+                InlineKeyboardButton("✅ Выполнить", callback_data=f"complete_{task_id}")
+            ])
         
-        response = await generate_ai_response(user_text, user_id, ai_type)
-        await update.message.reply_text(response)
-        return
+        keyboard.extend([
+            [
+                InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_{task_id}"),
+                InlineKeyboardButton("⏸️ Приостановить", callback_data=f"pause_{task_id}")
+            ],
+            [
+                InlineKeyboardButton("📊 Статистика", callback_data=f"task_stats_{task_id}"),
+                InlineKeyboardButton("🗑️ Удалить", callback_data=f"delete_{task_id}")
+            ],
+            [
+                InlineKeyboardButton("⬅️ Назад к списку", callback_data="tasks_refresh")
+            ]
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
     
-    # Простые ответы для обычного режима
-    responses = {
-        "привет": "👋 Привет! Используйте /start для главного меню",
-        "помощь": "🆘 Используйте /help для полной справки по командам",
-        "как дела": f"😊 Отлично! У вас {users_data[user_id]['xp']} XP. Проверьте прогресс командой /stats",
-        "спасибо": "🙏 Пожалуйста! Рад помочь в достижении ваших целей!",
-        "пока": "👋 До свидания! Удачи с выполнением задач!"
+    @staticmethod
+    def get_priority_keyboard() -> InlineKeyboardMarkup:
+        """Клавиатура выбора приоритета"""
+        keyboard = [
+            [InlineKeyboardButton("🔴 Высокий", callback_data="priority_high")],
+            [InlineKeyboardButton("🟡 Средний", callback_data="priority_medium")],
+            [InlineKeyboardButton("🔵 Низкий", callback_data="priority_low")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def get_completion_keyboard(active_tasks: Dict[str, Task]) -> InlineKeyboardMarkup:
+        """Клавиатура для отметки выполнения"""
+        keyboard = []
+        
+        incomplete_tasks = {
+            k: v for k, v in active_tasks.items() 
+            if not v.is_completed_today()
+        }
+        
+        for task_id, task in list(incomplete_tasks.items())[:8]:  # Ограничиваем до 8
+            priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🔵"}.get(task.priority, "🟡")
+            button_text = f"{priority_emoji} {task.title[:25]}"
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"complete_{task_id}")
+            ])
+        
+        if not incomplete_tasks:
+            keyboard.append([
+                InlineKeyboardButton("🎉 Все задачи выполнены!", callback_data="tasks_all_done")
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("❌ Отмена", callback_data="completion_cancel")
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def get_stats_keyboard() -> InlineKeyboardMarkup:
+        """Клавиатура для статистики"""
+        keyboard = [
+            [
+                InlineKeyboardButton("📈 Детальная статистика", callback_data="stats_detailed"),
+                InlineKeyboardButton("📊 График прогресса", callback_data="stats_chart")
+            ],
+            [
+                InlineKeyboardButton("📋 Экспорт данных", callback_data="stats_export"),
+                InlineKeyboardButton("🔄 Обновить", callback_data="stats_refresh")
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def get_settings_keyboard() -> InlineKeyboardMarkup:
+        """Клавиатура настроек"""
+        keyboard = [
+            [
+                InlineKeyboardButton("🔔 Напоминания", callback_data="settings_reminders"),
+                InlineKeyboardButton("🌍 Язык и время", callback_data="settings_locale")
+            ],
+            [
+                InlineKeyboardButton("📊 Уведомления", callback_data="settings_notifications"),
+                InlineKeyboardButton("🎨 Интерфейс", callback_data="settings_interface")
+            ],
+            [
+                InlineKeyboardButton("📝 Заметки", callback_data="settings_notes"),
+                InlineKeyboardButton("🔄 Обновить", callback_data="settings_refresh")
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+# ===== ФОРМАТИРОВАНИЕ И УТИЛИТЫ =====
+
+class MessageFormatter:
+    """Форматировщик сообщений"""
+    
+    PRIORITY_EMOJIS = {
+        "high": "🔴",
+        "medium": "🟡",
+        "low": "🔵"
     }
     
-    user_text_lower = user_text.lower()
-    for key, response in responses.items():
-        if key in user_text_lower:
-            await update.message.reply_text(response)
-            return
+    STATUS_EMOJIS = {
+        "active": "⭕",
+        "completed": "✅",
+        "paused": "⏸️",
+        "archived": "📦"
+    }
     
-    # Если ничего не подошло
-    await update.message.reply_text(
-        "🤔 Не понял команду.\n\n"
-        "💡 Используйте:\n"
-        "• /help - полная справка\n"
-        "• /ai_chat - включить AI режим\n"
-        "• /start - главное меню"
-    )
-
-# ===================== CALLBACK HANDLERS (Обработка кнопок) =====================
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка нажатий на inline кнопки"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    data = query.data
-    
-    if data == "show_tasks":
-        await show_tasks_callback(query, context)
-    elif data == "show_stats":
-        await show_stats_callback(query, context)
-    elif data == "show_achievements":
-        achievements_list = [ACHIEVEMENTS[i] for i in user_achievements.get(user_id, [])]
-        text = "🏆 **Ваши достижения:**\n\n"
-        if achievements_list:
-            for ach in achievements_list:
-                text += f"{ach['emoji']} **{ach['name']}**\n"
-                text += f"   {ach['desc']}\n"
-                text += f"   🎁 Награда: {ach['xp_reward']} XP\n\n"
+    @classmethod
+    def format_task_info(cls, task: Task, detailed: bool = True) -> str:
+        """Форматирование информации о задаче"""
+        priority_emoji = cls.PRIORITY_EMOJIS.get(task.priority, "🟡")
+        status_emoji = cls.STATUS_EMOJIS.get(task.status, "⭕")
+        
+        # Заголовок
+        info = f"{status_emoji} **{task.title}**\n"
+        
+        # Описание
+        if task.description and detailed:
+            info += f"📝 {task.description}\n"
+        
+        # Статус выполнения на сегодня
+        if task.is_completed_today():
+            info += "✅ Выполнено сегодня\n"
         else:
-            text += "Пока нет достижений.\n"
-            text += "Выполняйте задачи, используйте функции бота чтобы получить первые награды!"
-        await query.edit_message_text(text, parse_mode="Markdown")
-    elif data == "show_ai_help":
-        ai_status = "подключен" if OPENAI_API_KEY else "недоступен (настройте OPENAI_API_KEY)"
-        text = (
-            f"🤖 **AI Помощь** (статус: {ai_status})\n\n"
-            f"**Доступные AI команды:**\n"
-            f"• `/ai_chat` - включить режим общения\n"
-            f"• `/motivate [текст]` - получить мотивацию\n"
-            f"• `/ai_coach [вопрос]` - совет по продуктивности\n"
-            f"• `/psy [проблема]` - психологическая поддержка\n"
-            f"• `/suggest_tasks [категория]` - предложить задачи\n\n"
-            f"💡 В AI-чат режиме просто пишите сообщения и получайте умные ответы!"
+            info += "⭕ Не выполнено сегодня\n"
+        
+        # Основная информация
+        info += f"{priority_emoji} Приоритет: {task.priority}\n"
+        info += f"🔥 Streak: {task.current_streak} дней\n"
+        
+        if detailed:
+            info += f"📈 Неделя: {task.completion_rate_week:.1f}%\n"
+            info += f"📊 Месяц: {task.completion_rate_month:.1f}%\n"
+            
+            if task.tags:
+                info += f"🏷️ Теги: {', '.join(task.tags)}\n"
+            
+            # Дата создания
+            try:
+                created_date = datetime.fromisoformat(task.created_at).strftime('%d.%m.%Y')
+                info += f"📅 Создана: {created_date}\n"
+            except:
+                info += f"📅 Создана: {task.created_at}\n"
+            
+            # Последние выполнения
+            recent_completions = [
+                c for c in task.completions 
+                if c.completed and date.fromisoformat(c.date) >= date.today() - timedelta(days=7)
+            ]
+            if recent_completions:
+                info += f"🕐 Последние выполнения: {len(recent_completions)} за неделю"
+        
+        return info
+    
+    @classmethod
+    def format_user_stats(cls, user: User, detailed: bool = False) -> str:
+        """Форматирование статистики пользователя"""
+        # Сбор данных
+        today = date.today()
+        week_ago = today - timedelta(days=7)
+        month_ago = today - timedelta(days=30)
+        
+        total_tasks = len(user.tasks)
+        active_tasks = len(user.active_tasks)
+        completed_today = len(user.completed_tasks_today)
+        
+        # Подсчет выполнений за периоды
+        completed_week = completed_month = 0
+        for task in user.tasks.values():
+            for completion in task.completions:
+                if completion.completed:
+                    comp_date = date.fromisoformat(completion.date)
+                    if comp_date >= week_ago:
+                        completed_week += 1
+                    if comp_date >= month_ago:
+                        completed_month += 1
+        
+        # Streak статистика
+        current_streaks = [task.current_streak for task in user.active_tasks.values()]
+        max_streak = max(current_streaks) if current_streaks else 0
+        avg_streak = sum(current_streaks) / len(current_streaks) if current_streaks else 0
+        
+        # Формирование текста
+        stats_text = f"""📊 **Статистика {user.display_name}**
+
+🎯 **Общее:**
+• Всего задач: {total_tasks}
+• Активных: {active_tasks}
+• Выполнено всего: {user.stats.completed_tasks}
+• Процент выполнения: {user.stats.completion_rate:.1f}%
+
+📅 **За периоды:**
+• Сегодня: {completed_today} задач
+• За неделю: {completed_week} выполнений
+• За месяц: {completed_month} выполнений
+
+🔥 **Streak'и:**
+• Максимальный текущий: {max_streak} дней
+• Средний: {avg_streak:.1f} дней
+• Личный рекорд: {user.stats.longest_streak} дней"""
+
+        if detailed:
+            try:
+                reg_date = datetime.fromisoformat(user.stats.registration_date).strftime('%d.%m.%Y')
+            except:
+                reg_date = "неизвестно"
+            
+            stats_text += f"""
+
+👤 **Профиль:**
+• Регистрация: {reg_date}
+• Дней в системе: {user.stats.days_since_registration}
+• Достижений: {len(user.achievements)}
+
+🏆 **Достижения:**"""
+            
+            if user.achievements:
+                for achievement_id in user.achievements[-3:]:  # Последние 3
+                    if achievement_id in AchievementSystem.ACHIEVEMENTS:
+                        ach = AchievementSystem.ACHIEVEMENTS[achievement_id]
+                        stats_text += f"\n• {ach['icon']} {ach['title']}"
+            else:
+                stats_text += "\n• Пока нет достижений"
+        
+        return stats_text
+    
+    @classmethod
+    def format_leaderboard(cls, users: List[User], current_user_id: int) -> str:
+        """Форматирование таблицы лидеров"""
+        if len(users) < 2:
+            return "🏆 **Таблица лидеров**\n\nНедостаточно пользователей для составления рейтинга.\nПригласите друзей использовать бота!"
+        
+        # Подготовка данных для рейтинга
+        user_data = []
+        for user in users:
+            if not user.tasks:
+                continue
+            
+            max_streak = max([task.current_streak for task in user.active_tasks.values()] + [0])
+            total_completed = user.stats.completed_tasks
+            
+            user_data.append({
+                'user': user,
+                'max_streak': max_streak,
+                'total_completed': total_completed,
+                'completion_rate': user.stats.completion_rate
+            })
+        
+        if not user_data:
+            return "🏆 **Таблица лидеров**\n\nПока нет данных для рейтинга."
+        
+        # Сортировка по максимальному streak
+        user_data.sort(key=lambda x: (x['max_streak'], x['total_completed']), reverse=True)
+        
+        leaderboard_text = "🏆 **Таблица лидеров**\n\n📈 *По streak'ам:*\n"
+        
+        for i, data in enumerate(user_data[:10], 1):
+            user = data['user']
+            is_current = "← Вы" if user.user_id == current_user_id else ""
+            
+            emoji = "👑" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            
+            leaderboard_text += f"{emoji} {user.display_name} - {data['max_streak']} дней {is_current}\n"
+        
+        # Добавляем рейтинг по общему количеству выполнений
+        user_data.sort(key=lambda x: x['total_completed'], reverse=True)
+        
+        leaderboard_text += "\n🎯 *По выполнениям:*\n"
+        
+        for i, data in enumerate(user_data[:5], 1):
+            user = data['user']
+            is_current = "← Вы" if user.user_id == current_user_id else ""
+            
+            emoji = "🔥" if i == 1 else f"{i}."
+            
+            leaderboard_text += f"{emoji} {user.display_name} - {data['total_completed']} задач {is_current}\n"
+        
+        return leaderboard_text
+
+# ===== СОСТОЯНИЯ ДЛЯ CONVERSATION HANDLERS =====
+
+# Состояния для создания задачи
+TASK_TITLE, TASK_DESCRIPTION, TASK_PRIORITY, TASK_TAGS = range(4)
+
+# Состояния для настроек
+SETTINGS_REMINDER_TIME, SETTINGS_NOTES = range(100, 102)
+
+# ===== ОБРАБОТЧИКИ КОМАНД =====
+
+class CommandHandlers:
+    """Обработчики команд бота"""
+    
+    def __init__(self, db: DatabaseManager):
+        self.db = db
+    
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /start"""
+        user_telegram = update.effective_user
+        user = self.db.get_or_create_user(
+            user_id=user_telegram.id,
+            username=user_telegram.username,
+            first_name=user_telegram.first_name,
+            last_name=user_telegram.last_name
         )
-        await query.edit_message_text(text, parse_mode="Markdown")
-    elif data == "show_settings":
-        await show_settings_callback(query, context)
-    elif data == "show_weekly_goals":
-        await show_weekly_goals_callback(query, context)
-    elif data.startswith("complete_task_"):
-        task_index = int(data.split("_")[2])
-        if task_index < len(users_data[user_id]["tasks"]):
-            task = users_data[user_id]["tasks"][task_index]
-            task["completed"] = True
-            users_data[user_id]["completed_today"] += 1
-            users_data[user_id]["total_tasks_completed"] += 1
-            global_stats["tasks_completed"] += 1
-            
-            xp_reward = 25
-            # Бонус за приоритет
-            if task.get("priority") == "high":
-                xp_reward += 10
-            elif task.get("priority") == "low":
-                xp_reward += 5
-            
-            xp_msg = add_xp(user_id, xp_reward)
-            achievements = check_achievements(user_id)
-            
-            save_user_data()
-            
-            response = f"✅ **Задача выполнена!**\n"
-            response += f"📝 {task['name']}\n"
-            response += f"{xp_msg}"
-            
-            if achievements:
-                response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-            
-            await query.edit_message_text(response, parse_mode="Markdown")
-    elif data.startswith("complete_goal_"):
-        goal_index = int(data.split("_")[2])
-        if goal_index < len(users_data[user_id]["weekly_goals"]):
-            goal = users_data[user_id]["weekly_goals"][goal_index]
-            goal["completed"] = True
-            
-            xp_msg = add_xp(user_id, 50)
-            achievements = check_achievements(user_id)
-            save_user_data()
-            
-            response = f"🎯 **Еженедельная цель выполнена!**\n"
-            response += f"📝 {goal['name']}\n"
-            response += f"{xp_msg}"
-            
-            if achievements:
-                response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-            
-            await query.edit_message_text(response, parse_mode="Markdown")
-    elif data == "confirm_reset":
-        # Сбрасываем выполненные задачи
-        for task in users_data[user_id]["tasks"]:
-            task["completed"] = False
-            for subtask in task.get("subtasks", []):
-                subtask["completed"] = False
         
-        users_data[user_id]["completed_today"] = 0
-        save_user_data()
+        self.db.save_all_users()
+        logger.info(f"Команда /start от пользователя {user.user_id}")
         
-        await query.edit_message_text(
-            "🔄 **Прогресс дня сброшен!**\n\n"
-            "Все задачи помечены как невыполненные.\n"
-            "Начните новый продуктивный день!"
+        # Проверяем достижения
+        new_achievements = AchievementSystem.check_achievements(user)
+        if new_achievements:
+            self.db.save_all_users()
+        
+        welcome_text = f"""🎯 **Добро пожаловать в DailyCheck Bot v4.0!**
+
+Привет, {user.display_name}! 
+
+Я помогу тебе:
+📝 Создавать и отслеживать ежедневные задачи
+✅ Отмечать выполнение и следить за прогрессом  
+📊 Анализировать статистику и строить полезные привычки
+🔥 Поддерживать мотивацию с помощью streak'ов
+🏆 Получать достижения за успехи
+
+**Статистика:**
+• Задач: {len(user.tasks)}
+• Активных: {len(user.active_tasks)}
+• Выполнено: {user.stats.completed_tasks}
+• Достижений: {len(user.achievements)}
+
+Выбери действие в меню ниже:"""
+        
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=KeyboardManager.get_main_keyboard(),
+            parse_mode='Markdown'
         )
-    elif data == "add_task_dialog":
-        await query.edit_message_text(
-            "➕ **Добавление задачи**\n\n"
-            "Используйте команду:\n"
-            "`/addtask название [категория] [приоритет] [время]`\n\n"
-            "**Примеры:**\n"
-            "• `/addtask Проверить почту`\n"
-            "• `/addtask Спортзал health high 90`\n"
-            "• `/addtask Изучить Python study medium 60`\n\n"
-            "**Категории:** work, health, study, personal, finance\n"
-            "**Приоритеты:** low, medium, high",
-            parse_mode="Markdown"
-        )
-    elif data == "quick_setup":
-        await query.edit_message_text(
-            "📝 **Быстрая установка задач**\n\n"
-            "Используйте команду:\n"
-            "`/settasks задача1; задача2; задача3`\n\n"
-            "**Пример:**\n"
-            "`/settasks Проверить почту; Сделать зарядку; Прочитать книгу; Купить продукты`\n\n"
-            "💡 **Советы:**\n"
-            "• Разделяйте задачи точкой с запятой (;)\n"
-            "• Можно добавить до 10 задач за раз\n"
-            "• Все задачи получат категорию 'Личное' и средний приоритет",
-            parse_mode="Markdown"
-        )
-    elif data == "random_task":
-        # Генерируем случайную задачу
-        random_tasks = [
-            "Сделать 10-минутную зарядку",
-            "Прочитать 5 страниц книги", 
-            "Выпить стакан воды",
-            "Навести порядок на рабочем столе",
-            "Позвонить родителям/друзьям",
-            "Сделать дыхательные упражнения (5 мин)",
-            "Написать в дневник благодарности",
-            "Послушать подкаст или музыку",
-            "Сделать растяжку",
-            "Планировать завтрашний день"
-        ]
         
-        task_name = random.choice(random_tasks)
-        theme = THEMES[user_themes[user_id]]
+        # Отправляем уведомления о новых достижениях
+        for achievement_id in new_achievements:
+            achievement_msg = AchievementSystem.get_achievement_message(achievement_id)
+            await update.message.reply_text(achievement_msg, parse_mode='Markdown')
+    
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /help"""
+        help_text = """📖 **Справка по DailyCheck Bot v4.0**
+
+🔹 **Основные команды:**
+/start - Перезапустить бота
+/help - Показать эту справку
+/tasks - Список ваших задач
+/add - Добавить новую задачу
+/stats - Показать статистику
+/achievements - Ваши достижения
+/leaderboard - Таблица лидеров
+/settings - Настройки
+/export - Экспорт данных
+
+🔹 **Быстрые действия:**
+📝 Мои задачи - просмотр всех задач
+➕ Добавить задачу - создание новой задачи
+✅ Отметить выполнение - отметка задач как выполненных
+📊 Статистика - ваш прогресс и аналитика
+🏆 Достижения - полученные награды
+🔥 Лидерборд - сравнение с другими пользователями
+
+🔹 **Возможности:**
+• Создание ежедневных задач с приоритетами и тегами
+• Отслеживание streak'ов (серий выполнения)
+• Система достижений и мотивации
+• Детальная статистика и аналитика
+• Экспорт данных в различных форматах
+• Таблица лидеров для соревнования
+• Персональные настройки и заметки
+
+🔹 **Streak система:**
+Streak - это количество дней подряд, которые вы выполняете задачу.
+Чем длиннее streak, тем сильнее привычка!
+
+🔹 **Достижения:**
+Получайте награды за различные успехи:
+• Создание задач
+• Длинные streak'и  
+• Большое количество выполнений
+• Идеальные недели
+
+💡 **Совет:** Используйте кнопки для быстрого доступа к функциям!"""
         
-        keyboard = [
-            [InlineKeyboardButton("✅ Добавить эту задачу", callback_data=f"add_random_task_{random_tasks.index(task_name)}")],
-            [InlineKeyboardButton("🎲 Другая задача", callback_data="random_task")],
-            [InlineKeyboardButton("↩️ Назад", callback_data="back_to_start")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /tasks - показать список задач"""
+        user = self.db.get_or_create_user(update.effective_user.id)
         
-        await query.edit_message_text(
-            f"{theme['accent']} **Случайная задача**\n\n"
-            f"💡 Предлагаю выполнить:\n"
-            f"📝 **{task_name}**\n\n"
-            f"Хотите добавить эту задачу в свой список?",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-    elif data.startswith("add_random_task_"):
-        task_index = int(data.split("_")[3])
-        random_tasks = [
-            "Сделать 10-минутную зарядку",
-            "Прочитать 5 страниц книги", 
-            "Выпить стакан воды",
-            "Навести порядок на рабочем столе",
-            "Позвонить родителям/друзьям",
-            "Сделать дыхательные упражнения (5 мин)",
-            "Написать в дневник благодарности",
-            "Послушать подкаст или музыку",
-            "Сделать растяжку",
-            "Планировать завтрашний день"
-        ]
+        if not user.tasks:
+            await update.message.reply_text(
+                "📝 **У вас пока нет задач!**\n\nСоздайте первую задачу, чтобы начать отслеживать свой прогресс.\n\nИспользуйте кнопку '➕ Добавить задачу' или команду /add",
+                reply_markup=KeyboardManager.get_main_keyboard(),
+                parse_mode='Markdown'
+            )
+            return
         
-        if task_index < len(random_tasks):
-            task_name = random_tasks[task_index]
+        active_tasks = user.active_tasks
+        
+        if not active_tasks:
+            await update.message.reply_text(
+                "📝 **У вас нет активных задач!**\n\nВсе задачи выполнены или приостановлены.\n\nМожете создать новые задачи или активировать существующие.",
+                reply_markup=KeyboardManager.get_main_keyboard(),
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Подсчитываем статистику
+        completed_today = len(user.completed_tasks_today)
+        completion_percentage = (completed_today / len(active_tasks)) * 100
+        
+        text = f"📝 **Ваши активные задачи ({len(active_tasks)}):**\n\n"
+        text += f"📊 Прогресс сегодня: {completed_today}/{len(active_tasks)} ({completion_percentage:.0f}%)\n\n"
+        
+        # Показываем первые 5 задач в тексте
+        for i, (task_id, task) in enumerate(list(active_tasks.items())[:5], 1):
+            status_emoji = "✅" if task.is_completed_today() else "⭕"
+            priority_emoji = MessageFormatter.PRIORITY_EMOJIS.get(task.priority, "🟡")
             
-            # Добавляем задачу
-            task = {
-                "name": task_name,
-                "completed": False,
-                "created_at": datetime.now().isoformat(),
-                "category": "personal",
-                "priority": "medium",
-                "subtasks": []
+            text += f"{i}. {status_emoji} {priority_emoji} {task.title}\n"
+            text += f"   🔥 Streak: {task.current_streak} | 📈 Неделя: {task.completion_rate_week:.0f}%\n\n"
+        
+        if len(active_tasks) > 5:
+            text += f"... и еще {len(active_tasks) - 5} задач\n\n"
+        
+        text += "Выберите задачу для подробной информации:"
+        
+        await update.message.reply_text(
+            text,
+            reply_markup=KeyboardManager.get_tasks_inline_keyboard(active_tasks),
+            parse_mode='Markdown'
+        )
+    
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /stats - показать статистику"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        if not user.tasks:
+            await update.message.reply_text(
+                "📊 **Статистика недоступна**\n\nУ вас пока нет задач!\n\nСоздайте первую задачу для начала отслеживания прогресса.",
+                reply_markup=KeyboardManager.get_main_keyboard(),
+                parse_mode='Markdown'
+            )
+            return
+        
+        stats_text = MessageFormatter.format_user_stats(user, detailed=True)
+        
+        await update.message.reply_text(
+            stats_text,
+            reply_markup=KeyboardManager.get_stats_keyboard(),
+            parse_mode='Markdown'
+        )
+    
+    async def achievements_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /achievements - показать достижения"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        # Проверяем новые достижения
+        new_achievements = AchievementSystem.check_achievements(user)
+        if new_achievements:
+            self.db.save_all_users()
+        
+        if not user.achievements:
+            text = """🏆 **Ваши достижения**
+
+У вас пока нет достижений!
+
+Продолжайте использовать бота, создавайте задачи и поддерживайте streak'и, чтобы получить первые награды.
+
+🎯 **Доступные достижения:**
+• 🎯 Первые шаги - создайте первую задачу
+• 🔥 Начинающий - streak 3 дня
+• 💪 Неделя силы - streak 7 дней
+• 📈 Продуктивный - выполните 10 задач
+... и многие другие!"""
+        else:
+            text = f"🏆 **Ваши достижения ({len(user.achievements)}):**\n\n"
+            
+            for achievement_id in user.achievements:
+                if achievement_id in AchievementSystem.ACHIEVEMENTS:
+                    ach = AchievementSystem.ACHIEVEMENTS[achievement_id]
+                    text += f"{ach['icon']} **{ach['title']}**\n"
+                    text += f"   {ach['description']}\n\n"
+            
+            # Показываем прогресс к следующим достижениям
+            text += "🎯 **Ближайшие цели:**\n"
+            
+            # Проверяем прогресс к streak достижениям
+            max_streak = max([task.current_streak for task in user.active_tasks.values()] + [0])
+            
+            if 'streak_3' not in user.achievements and max_streak < 3:
+                text += f"🔥 Streak 3 дня - осталось {3 - max_streak} дней\n"
+            elif 'streak_7' not in user.achievements and max_streak < 7:
+                text += f"💪 Streak 7 дней - осталось {7 - max_streak} дней\n"
+            elif 'streak_30' not in user.achievements and max_streak < 30:
+                text += f"💎 Streak 30 дней - осталось {30 - max_streak} дней\n"
+        
+        await update.message.reply_text(text, parse_mode='Markdown')
+        
+        # Отправляем уведомления о новых достижениях
+        for achievement_id in new_achievements:
+            achievement_msg = AchievementSystem.get_achievement_message(achievement_id)
+            await update.message.reply_text(achievement_msg, parse_mode='Markdown')
+    
+    async def leaderboard_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /leaderboard - таблица лидеров"""
+        all_users = self.db.get_all_users()
+        current_user_id = update.effective_user.id
+        
+        leaderboard_text = MessageFormatter.format_leaderboard(all_users, current_user_id)
+        
+        await update.message.reply_text(leaderboard_text, parse_mode='Markdown')
+    
+    async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /settings - настройки пользователя"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        settings_text = f"""⚙️ **Настройки**
+
+🌍 **Локализация:**
+• Язык: {user.settings.language}
+• Часовой пояс: {user.settings.timezone}
+
+🔔 **Напоминания:**
+• Включены: {'✅' if user.settings.reminder_enabled else '❌'}
+• Время: {user.settings.daily_reminder_time}
+
+📊 **Уведомления:**
+• Еженедельная статистика: {'✅' if user.settings.weekly_stats else '❌'}
+• Мотивационные сообщения: {'✅' if user.settings.motivational_messages else '❌'}
+• Звук уведомлений: {'✅' if user.settings.notification_sound else '❌'}
+
+🎨 **Интерфейс:**
+• Автоархивирование: {'✅' if user.settings.auto_archive_completed else '❌'}
+
+📝 **Заметки:**
+{user.notes[:100] + '...' if len(user.notes) > 100 else user.notes or 'Заметки не добавлены'}"""
+        
+        await update.message.reply_text(
+            settings_text,
+            reply_markup=KeyboardManager.get_settings_keyboard(),
+            parse_mode='Markdown'
+        )
+    
+    async def export_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /export - экспорт данных"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        if not user.tasks:
+            await update.message.reply_text(
+                "📊 **Нет данных для экспорта**\n\nУ вас пока нет задач!"
+            )
+            return
+        
+        try:
+            # Создаем данные для экспорта
+            export_data = {
+                "user_info": {
+                    "user_id": user.user_id,
+                    "display_name": user.display_name,
+                    "username": user.username,
+                    "registration_date": user.stats.registration_date,
+                    "export_date": datetime.now().isoformat(),
+                    "export_version": "4.0"
+                },
+                "statistics": user.stats.to_dict(),
+                "settings": user.settings.to_dict(),
+                "tasks": [task.to_dict() for task in user.tasks.values()],
+                "achievements": user.achievements,
+                "notes": user.notes
             }
             
-            users_data[user_id]["tasks"].append(task)
-            users_data[user_id]["total_tasks_created"] += 1
+            # Создаем JSON файл
+            export_json = json.dumps(export_data, ensure_ascii=False, indent=2)
+            file_buffer = io.BytesIO(export_json.encode('utf-8'))
+            file_buffer.name = f"dailycheck_export_{user.user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             
-            xp_msg = add_xp(user_id, 10)
-            achievements = check_achievements(user_id)
-            save_user_data()
+            caption = f"""📊 **Экспорт данных DailyCheck Bot v4.0**
+
+👤 Пользователь: {user.display_name}
+📅 Дата экспорта: {datetime.now().strftime('%d.%m.%Y %H:%M')}
+📝 Задач: {len(user.tasks)}
+🏆 Достижений: {len(user.achievements)}
+
+Файл содержит всю информацию о ваших задачах, статистике и настройках."""
             
-            response = f"✅ **Задача добавлена!**\n"
-            response += f"📝 {task_name}\n"
-            response += f"{xp_msg}"
+            await update.message.reply_document(
+                document=file_buffer,
+                caption=caption,
+                filename=file_buffer.name
+            )
             
-            if achievements:
-                response += f"\n🏆 Новые достижения: {', '.join(achievements)}"
+            logger.info(f"Экспорт данных для пользователя {user.user_id}")
             
-            await query.edit_message_text(response, parse_mode="Markdown")
-    elif data == "back_to_start":
-        # Возвращаемся к главному меню
-        user_data = users_data[user_id]
-        theme = THEMES[user_themes[user_id]]
-        level_info = get_user_level(user_data["xp"])
+        except Exception as e:
+            logger.error(f"Ошибка экспорта данных: {e}")
+            await update.message.reply_text(
+                "❌ **Ошибка экспорта**\n\nПроизошла ошибка при создании файла экспорта. Попробуйте позже."
+            )
+
+# ===== ОБРАБОТЧИКИ СОЗДАНИЯ ЗАДАЧ =====
+
+class TaskCreationHandlers:
+    """Обработчики создания задач через ConversationHandler"""
+    
+    def __init__(self, db: DatabaseManager):
+        self.db = db
+    
+    async def add_task_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начало создания задачи"""
+        await update.message.reply_text(
+            "📝 **Создание новой задачи**\n\nВведите название задачи (максимум 100 символов):",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
+        return TASK_TITLE
+    
+    async def add_task_title(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение названия задачи"""
+        title = update.message.text.strip()
         
-        keyboard = [
-            [InlineKeyboardButton(f"📋 Мои задачи ({len(user_data['tasks'])})", callback_data="show_tasks")],
-            [InlineKeyboardButton(f"📊 Статистика", callback_data="show_stats"), 
-             InlineKeyboardButton(f"🏆 Достижения ({len(user_achievements[user_id])})", callback_data="show_achievements")],
-            [InlineKeyboardButton(f"🤖 AI Помощь", callback_data="show_ai_help"),
-             InlineKeyboardButton(f"⚙️ Настройки", callback_data="show_settings")],
-            [InlineKeyboardButton(f"{theme['accent']} Случайная задача", callback_data="random_task"),
-             InlineKeyboardButton(f"🎯 Цели недели", callback_data="show_weekly_goals")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        if len(title) > 100:
+            await update.message.reply_text(
+                "❌ **Название слишком длинное!**\n\nМаксимум 100 символов.\nПопробуйте еще раз:"
+            )
+            return TASK_TITLE
         
-        # Время суток для приветствия
-        current_hour = datetime.now().hour
-        if 5 <= current_hour < 12:
-            greeting = "🌅 Доброе утро"
-        elif 12 <= current_hour < 17:
-            greeting = "☀️ Добрый день"
-        elif 17 <= current_hour < 22:
-            greeting = "🌆 Добрый вечер"
+        if len(title) < 3:
+            await update.message.reply_text(
+                "❌ **Название слишком короткое!**\n\nМинимум 3 символа.\nПопробуйте еще раз:"
+            )
+            return TASK_TITLE
+        
+        context.user_data['task_title'] = title
+        
+        await update.message.reply_text(
+            f"✅ **Название:** {title}\n\nТеперь введите описание задачи (максимум 500 символов) или отправьте 'пропустить':",
+            parse_mode='Markdown'
+        )
+        return TASK_DESCRIPTION
+    
+    async def add_task_description(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение описания задачи"""
+        description = update.message.text.strip()
+        
+        if description.lower() in ['пропустить', 'skip', '-', 'нет']:
+            description = None
+        elif len(description) > 500:
+            await update.message.reply_text(
+                "❌ **Описание слишком длинное!**\n\nМаксимум 500 символов.\nПопробуйте еще раз (или 'пропустить'):"
+            )
+            return TASK_DESCRIPTION
+        
+        context.user_data['task_description'] = description
+        
+        await update.message.reply_text(
+            f"✅ **Описание:** {description or 'не указано'}\n\nВыберите приоритет задачи:",
+            reply_markup=KeyboardManager.get_priority_keyboard(),
+            parse_mode='Markdown'
+        )
+        return TASK_PRIORITY
+    
+    async def add_task_priority(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение приоритета задачи"""
+        query = update.callback_query
+        await query.answer()
+        
+        priority_map = {
+            "priority_high": "high",
+            "priority_medium": "medium",
+            "priority_low": "low"
+        }
+        
+        priority = priority_map.get(query.data, "medium")
+        context.user_data['task_priority'] = priority
+        
+        priority_names = {"high": "Высокий", "medium": "Средний", "low": "Низкий"}
+        
+        await query.edit_message_text(
+            f"✅ **Приоритет:** {priority_names[priority]}\n\nВведите теги через запятую (максимум 5 тегов) или 'пропустить':"
+        )
+        return TASK_TAGS
+    
+    async def add_task_tags(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение тегов и создание задачи"""
+        tags_text = update.message.text.strip()
+        
+        if tags_text.lower() in ['пропустить', 'skip', '-', 'нет']:
+            tags = []
         else:
-            greeting = "🌙 Доброй ночи"
+            tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+            tags = tags[:5]  # Максимум 5 тегов
+            tags = [tag[:20] for tag in tags]  # Максимум 20 символов на тег
         
-        text = (
-            f"{greeting}!\n\n"
-            f"🤖 DailyCheck Bot v4.0 - ваш AI помощник!\n\n"
-            f"📊 Уровень: {level_info[1]}\n"
-            f"⚡ XP: {user_data['xp']}\n"
-            f"🔥 Стрик: {user_data['streak']} дней\n"
-            f"✅ Сегодня выполнено: {user_data['completed_today']}\n\n"
-            f"🎨 Тема: {theme['name']}\n\n"
-            f"Выберите действие:"
+        # Создаем задачу
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        task = Task(
+            task_id=str(uuid.uuid4()),
+            user_id=user.user_id,
+            title=context.user_data['task_title'],
+            description=context.user_data.get('task_description'),
+            priority=context.user_data['task_priority'],
+            tags=tags
         )
         
-        await query.edit_message_text(text, reply_markup=reply_markup)
-    elif data == "set_weekly_goals":
-        await query.edit_message_text(
-            "🎯 **Установка еженедельных целей**\n\n"
-            "Используйте команду:\n"
-            "`/set_weekly цель1; цель2; цель3`\n\n"
-            "**Примеры целей:**\n"
-            "• Прочитать книгу\n"
-            "• Сделать 5 тренировок\n"
-            "• Изучить новую тему\n"
-            "• Встретиться с друзьями\n"
-            "• Завершить проект\n\n"
-            "💡 Цели помогают планировать долгосрочные задачи!",
-            parse_mode="Markdown"
+        # Добавляем задачу пользователю
+        user.tasks[task.task_id] = task
+        user.stats.total_tasks += 1
+        
+        # Проверяем достижения
+        new_achievements = AchievementSystem.check_achievements(user)
+        
+        # Сохраняем
+        self.db.save_all_users()
+        
+        # Очищаем данные из контекста
+        context.user_data.clear()
+        
+        success_text = f"🎉 **Задача создана!**\n\n{MessageFormatter.format_task_info(task)}"
+        
+        await update.message.reply_text(
+            success_text,
+            reply_markup=KeyboardManager.get_main_keyboard(),
+            parse_mode='Markdown'
         )
-    elif data == "example_goals":
-        await query.edit_message_text(
-            "💡 **Примеры еженедельных целей**\n\n"
-            "**🏢 Работа:**\n"
-            "• Завершить отчет по проекту\n"
-            "• Изучить новую технологию\n"
-            "• Провести презентацию\n\n"
-            "**💪 Здоровье:**\n"
-            "• Тренироваться 4 раза\n"
-            "• Пить 2 литра воды ежедневно\n"
-            "• Спать по 8 часов\n\n"
-            "**📚 Обучение:**\n"
-            "• Прочитать книгу\n"
-            "• Пройти онлайн-курс\n"
-            "• Изучить 50 новых слов\n\n"
-            "**👨‍👩‍👧‍👦 Личное:**\n"
-            "• Навестить родителей\n"
-            "• Организовать документы\n"
-            "• Встретиться с друзьями\n\n"
-            "Используйте: `/set_weekly цель1; цель2; цель3`",
-            parse_mode="Markdown"
-        )
-
-# Отдельные функции для callback'ов
-async def show_tasks_callback(query, context):
-    """Показать задачи через callback"""
-    user_id = query.from_user.id
-    init_user(user_id)
-    log_command(user_id, "callback_tasks")
+        
+        # Отправляем уведомления о новых достижениях
+        for achievement_id in new_achievements:
+            achievement_msg = AchievementSystem.get_achievement_message(achievement_id)
+            await update.message.reply_text(achievement_msg, parse_mode='Markdown')
+        
+        logger.info(f"Пользователь {user.user_id} создал задачу: {task.title}")
+        return ConversationHandler.END
     
-    tasks = users_data[user_id]["tasks"]
-    if not tasks:
+    async def cancel_add_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отмена создания задачи"""
+        context.user_data.clear()
+        await update.message.reply_text(
+            "❌ **Создание задачи отменено.**",
+            reply_markup=KeyboardManager.get_main_keyboard(),
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+# ===== ОБРАБОТЧИКИ CALLBACK ЗАПРОСОВ =====
+
+class CallbackHandlers:
+    """Обработчики callback запросов"""
+    
+    def __init__(self, db: DatabaseManager):
+        self.db = db
+    
+    async def handle_task_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Основной обработчик callback для задач"""
+        query = update.callback_query
+        await query.answer()
+        
+        user = self.db.get_or_create_user(update.effective_user.id)
+        data = query.data
+        
+        try:
+            if data.startswith("task_view_"):
+                await self._handle_task_view(query, user, data)
+            elif data.startswith("complete_"):
+                await self._handle_task_complete(query, user, data)
+            elif data.startswith("uncomplete_"):
+                await self._handle_task_uncomplete(query, user, data)
+            elif data.startswith("pause_"):
+                await self._handle_task_pause(query, user, data)
+            elif data.startswith("delete_"):
+                await self._handle_task_delete(query, user, data)
+            elif data.startswith("task_stats_"):
+                await self._handle_task_stats(query, user, data)
+            elif data == "tasks_refresh":
+                await self._handle_tasks_refresh(query, user)
+            elif data == "tasks_more":
+                await self._handle_tasks_more(query, user)
+            elif data == "completion_cancel":
+                await query.edit_message_text("❌ Отметка выполнения отменена.")
+            elif data == "tasks_all_done":
+                await query.edit_message_text("🎉 Отлично! Все задачи на сегодня выполнены!\n\nПродолжайте в том же духе!")
+        except Exception as e:
+            logger.error(f"Ошибка обработки callback {data}: {e}")
+            await query.edit_message_text("❌ Произошла ошибка. Попробуйте еще раз.")
+    
+    async def _handle_task_view(self, query, user: User, data: str):
+        """Просмотр детальной информации о задаче"""
+        task_id = data.replace("task_view_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        
+        task_info = MessageFormatter.format_task_info(task, detailed=True)
+        keyboard = KeyboardManager.get_task_actions_keyboard(task_id, task.is_completed_today())
+        
+        await query.edit_message_text(
+            task_info,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    
+    async def _handle_task_complete(self, query, user: User, data: str):
+        """Отметка задачи как выполненной"""
+        task_id = data.replace("complete_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        
+        if task.is_completed_today():
+            await query.edit_message_text("✅ Задача уже выполнена сегодня!")
+            return
+        
+        # Отмечаем как выполненную
+        if task.mark_completed():
+            user.stats.completed_tasks += 1
+            
+            # Обновляем максимальный streak пользователя
+            if task.current_streak > user.stats.longest_streak:
+                user.stats.longest_streak = task.current_streak
+            
+            # Проверяем достижения
+            new_achievements = AchievementSystem.check_achievements(user)
+            
+            self.db.save_all_users()
+            
+            streak_text = f"🔥 Streak: {task.current_streak} дней!"
+            if task.current_streak > 1 and task.current_streak == user.stats.longest_streak:
+                streak_text += " 🏆 Новый личный рекорд!"
+            
+            motivational_messages = [
+                "Отличная работа! 💪",
+                "Так держать! 🎯",
+                "Вы на правильном пути! 🌟",
+                "Каждый день делает вас сильнее! 💪",
+                "Продолжайте в том же духе! 🔥"
+            ]
+            
+            response_text = f"""🎉 **Задача выполнена!**
+
+✅ {task.title}
+{streak_text}
+
+{random.choice(motivational_messages)}"""
+            
+            await query.edit_message_text(response_text, parse_mode='Markdown')
+            
+            # Отправляем уведомления о новых достижениях
+            for achievement_id in new_achievements:
+                achievement_msg = AchievementSystem.get_achievement_message(achievement_id)
+                await query.message.reply_text(achievement_msg, parse_mode='Markdown')
+            
+            logger.info(f"Пользователь {user.user_id} выполнил задачу: {task.title}")
+        else:
+            await query.edit_message_text("❌ Ошибка при отметке выполнения.")
+    
+    async def _handle_task_uncomplete(self, query, user: User, data: str):
+        """Отмена выполнения задачи"""
+        task_id = data.replace("uncomplete_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        
+        if not task.is_completed_today():
+            await query.edit_message_text("⭕ Задача не была выполнена сегодня!")
+            return
+        
+        if task.mark_uncompleted():
+            user.stats.completed_tasks = max(0, user.stats.completed_tasks - 1)
+            self.db.save_all_users()
+            
+            await query.edit_message_text(
+                f"❌ **Выполнение отменено**\n\n⭕ {task.title}\n\nВы можете выполнить эту задачу позже."
+            )
+            
+            logger.info(f"Пользователь {user.user_id} отменил выполнение задачи: {task.title}")
+        else:
+            await query.edit_message_text("❌ Ошибка при отмене выполнения.")
+    
+    async def _handle_task_pause(self, query, user: User, data: str):
+        """Приостановка задачи"""
+        task_id = data.replace("pause_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        task.status = "paused"
+        self.db.save_all_users()
+        
+        await query.edit_message_text(
+            f"⏸️ **Задача приостановлена**\n\n{task.title}\n\nВы можете активировать её позже через настройки."
+        )
+        
+        logger.info(f"Пользователь {user.user_id} приостановил задачу: {task.title}")
+    
+    async def _handle_task_delete(self, query, user: User, data: str):
+        """Удаление задачи"""
+        task_id = data.replace("delete_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        task_title = task.title
+        
+        # Создаем клавиатуру подтверждения
         keyboard = [
-            [InlineKeyboardButton("➕ Добавить задачу", callback_data="add_task_dialog")],
-            [InlineKeyboardButton("📝 Быстрая установка", callback_data="quick_setup")]
+            [
+                InlineKeyboardButton("🗑️ Да, удалить", callback_data=f"confirm_delete_{task_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"task_view_{task_id}")
+            ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
-            "📋 У вас пока нет задач.\n\n"
-            "Добавьте первую задачу и начните путь к продуктивности!",
-            reply_markup=reply_markup
+            f"⚠️ **Подтвердите удаление**\n\n🗑️ {task_title}\n\n**Внимание:** Все данные о выполнении будут потеряны!",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
         )
-        return
     
-    text = "📋 **Ваши задачи:**\n\n"
-    keyboard = []
-    
-    for i, task in enumerate(tasks):
-        status = "✅" if task.get("completed", False) else "⭕"
-        priority_emoji = PRIORITIES[task.get("priority", "medium")]["emoji"]
-        category_emoji = CATEGORIES[task.get("category", "personal")]["emoji"]
+    async def _handle_task_stats(self, query, user: User, data: str):
+        """Статистика конкретной задачи"""
+        task_id = data.replace("task_stats_", "")
         
-        text += f"{status} {i+1}. {task['name']}\n"
-        text += f"   {category_emoji} {priority_emoji}"
-        if task.get("estimate"):
-            text += f" ⏱️ {task['estimate']} мин"
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
         
-        # Подзадачи
-        if task.get("subtasks"):
-            text += f"\n   📝 Подзадачи ({len(task['subtasks'])}):"
-            for j, subtask in enumerate(task["subtasks"]):
-                sub_status = "✅" if subtask.get("completed", False) else "⭕"
-                text += f"\n      {sub_status} {j+1}. {subtask['name']}"
+        task = user.tasks[task_id]
         
-        text += "\n\n"
+        # Подробная статистика
+        total_completions = len([c for c in task.completions if c.completed])
+        total_days = (datetime.now() - datetime.fromisoformat(task.created_at)).days + 1
+        overall_rate = (total_completions / total_days) * 100 if total_days > 0 else 0
         
-        # Кнопки для незавершенных задач
-        if not task.get("completed", False):
-            keyboard.append([InlineKeyboardButton(f"✅ Задача {i+1}", callback_data=f"complete_task_{i}")])
-    
-    keyboard.extend([
-        [InlineKeyboardButton("➕ Добавить", callback_data="add_task_dialog"),
-         InlineKeyboardButton("✏️ Редактировать", callback_data="edit_tasks")],
-        [InlineKeyboardButton("🔄 Сбросить день", callback_data="reset_day")]
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        # Последние выполнения
+        recent_completions = [
+            c for c in task.completions 
+            if c.completed and date.fromisoformat(c.date) >= date.today() - timedelta(days=30)
+        ]
+        
+        stats_text = f"""📊 **Статистика задачи**
 
-async def show_stats_callback(query, context):
-    """Показать статистику через callback"""
-    user_id = query.from_user.id
-    init_user(user_id)
-    log_command(user_id, "callback_stats")
-    
-    users_data[user_id]["stats_views"] += 1
-    user = users_data[user_id]
-    level_info = get_user_level(user["xp"])
-    
-    total_tasks = len(user["tasks"])
-    completed_tasks = sum(1 for task in user["tasks"] if task.get("completed", False))
-    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-    
-    text = f"📊 **Детальная статистика**\n\n"
-    text += f"👤 Уровень: {level_info[1]}\n"
-    text += f"⚡ XP: {user['xp']}/{(level_info[0] + 1) * 100}\n"
-    text += f"🔥 Стрик: {user['streak']} дней\n"
-    text += f"📋 Всего задач: {total_tasks}\n"
-    text += f"✅ Выполнено: {completed_tasks}\n"
-    text += f"📈 Процент выполнения: {completion_rate:.1f}%\n\n"
-    text += f"🏆 Достижений: {len(user_achievements[user_id])}/{len(ACHIEVEMENTS)}\n"
-    text += f"👥 Друзей: {len(user_friends[user_id])}\n"
-    
-    achievements = check_achievements(user_id)
-    if achievements:
-        text += f"\n🏆 Новые достижения: {', '.join(achievements)}"
-    
-    save_user_data()
-    await query.edit_message_text(text, parse_mode="Markdown")
+📝 {task.title}
 
-async def show_settings_callback(query, context):
-    """Показать настройки через callback"""
-    user_id = query.from_user.id
-    init_user(user_id)
-    
-    user = users_data[user_id]
-    theme = THEMES[user_themes[user_id]]["name"]
-    ai_chat = user_ai_chat[user_id]
-    
-    text = f"⚙️ **Настройки пользователя**\n\n"
-    text += f"🎨 Тема: {theme}\n"
-    text += f"🤖 AI-чат: {'включен' if ai_chat else 'выключен'}\n"
-    text += f"🚭 Dry режим: {'включен' if user['dry_mode'] else 'выключен'}\n"
-    text += f"📅 Регистрация: {user['created_at'][:10]}\n"
-    text += f"📊 Уровень: {get_user_level(user['xp'])[1]}\n"
-    text += f"⚡ XP: {user['xp']}\n"
-    text += f"🔥 Стрик: {user['streak']} дней\n\n"
-    
-    text += "**Команды для изменения:**\n"
-    text += "• `/theme` - сменить тему\n"
-    text += "• `/ai_chat` - переключить AI-чат\n"
-    text += "• `/dryon` или `/dryoff` - dry режим\n"
-    text += "• `/export` - экспорт ваших данных"
-    
-    keyboard = [
-        [InlineKeyboardButton("🎨 Сменить тему", callback_data="change_theme")],
-        [InlineKeyboardButton("🤖 Переключить AI", callback_data="toggle_ai")],
-        [InlineKeyboardButton("📤 Экспорт данных", callback_data="export_data")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+🎯 **Общая статистика:**
+• Всего выполнений: {total_completions}
+• Дней с создания: {total_days}
+• Общий процент: {overall_rate:.1f}%
 
-async def show_weekly_goals_callback(query, context):
-    """Показать еженедельные цели через callback"""
-    user_id = query.from_user.id
-    init_user(user_id)
-    
-    goals = users_data[user_id]["weekly_goals"]
-    if not goals:
+🔥 **Streak информация:**
+• Текущий streak: {task.current_streak} дней
+• Статус: {'✅ Выполнено сегодня' if task.is_completed_today() else '⭕ Не выполнено сегодня'}
+
+📈 **По периодам:**
+• За неделю: {task.completion_rate_week:.1f}%
+• За месяц: {task.completion_rate_month:.1f}%
+• За 30 дней: {len(recent_completions)} выполнений
+
+📅 **Создана:** {datetime.fromisoformat(task.created_at).strftime('%d.%m.%Y')}"""
+        
         keyboard = [
-            [InlineKeyboardButton("🎯 Установить цели", callback_data="set_weekly_goals")],
-            [InlineKeyboardButton("💡 Примеры целей", callback_data="example_goals")]
+            [InlineKeyboardButton("⬅️ Назад к задаче", callback_data=f"task_view_{task_id}")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "🎯 **У вас пока нет еженедельных целей.**\n\n"
-            "Еженедельные цели помогают:\n"
-            "• Планировать долгосрочные задачи\n"
-            "• Поддерживать мотивацию\n"
-            "• Отслеживать прогресс\n\n"
-            "Установите свои первые цели!",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+            stats_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
         )
-        return
     
-    text = "🎯 **Еженедельные цели:**\n\n"
-    keyboard = []
-    
-    for i, goal in enumerate(goals, 1):
-        status = "✅" if goal.get("completed", False) else "⭕"
-        progress = goal.get("progress", 0)
-        target = goal.get("target", 1)
+    async def _handle_tasks_refresh(self, query, user: User):
+        """Обновление списка задач"""
+        active_tasks = user.active_tasks
         
-        text += f"{status} {i}. {goal['name']}\n"
-        if target > 1:
-            text += f"   📊 Прогресс: {progress}/{target}\n"
-        text += f"   📅 Создана: {goal['created_at'][:10]}\n\n"
+        if not active_tasks:
+            await query.edit_message_text("📝 У вас нет активных задач!")
+            return
         
-        if not goal.get("completed", False):
-            keyboard.append([InlineKeyboardButton(f"✅ Цель {i}", callback_data=f"complete_goal_{i-1}")])
+        # Подсчитываем статистику
+        completed_today = len(user.completed_tasks_today)
+        completion_percentage = (completed_today / len(active_tasks)) * 100
+        
+        text = f"📝 **Ваши активные задачи ({len(active_tasks)}):**\n\n"
+        text += f"📊 Прогресс сегодня: {completed_today}/{len(active_tasks)} ({completion_percentage:.0f}%)\n\n"
+        
+        # Краткий список
+        for i, (task_id, task) in enumerate(list(active_tasks.items())[:5], 1):
+            status_emoji = "✅" if task.is_completed_today() else "⭕"
+            priority_emoji = MessageFormatter.PRIORITY_EMOJIS.get(task.priority, "🟡")
+            
+            text += f"{i}. {status_emoji} {priority_emoji} {task.title}\n"
+            text += f"   🔥 Streak: {task.current_streak} | 📈 Неделя: {task.completion_rate_week:.0f}%\n\n"
+        
+        if len(active_tasks) > 5:
+            text += f"... и еще {len(active_tasks) - 5} задач\n\n"
+        
+        text += "Выберите задачу для подробной информации:"
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=KeyboardManager.get_tasks_inline_keyboard(active_tasks),
+            parse_mode='Markdown'
+        )
     
-    keyboard.extend([
-        [InlineKeyboardButton("➕ Добавить цель", callback_data="add_weekly_goal")],
-        [InlineKeyboardButton("🔄 Новая неделя", callback_data="reset_weekly_goals")]
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    async def _handle_tasks_more(self, query, user: User):
+        """Показать больше задач"""
+        all_tasks = user.tasks
+        
+        text = f"📝 **Все ваши задачи ({len(all_tasks)}):**\n\n"
+        
+        # Группируем по статусу
+        active_tasks = [t for t in all_tasks.values() if t.status == "active"]
+        paused_tasks = [t for t in all_tasks.values() if t.status == "paused"]
+        archived_tasks = [t for t in all_tasks.values() if t.status == "archived"]
+        
+        if active_tasks:
+            text += f"⭕ **Активные ({len(active_tasks)}):**\n"
+            for task in active_tasks[:10]:
+                status_emoji = "✅" if task.is_completed_today() else "⭕"
+                text += f"• {status_emoji} {task.title} (🔥{task.current_streak})\n"
+            
+            if len(active_tasks) > 10:
+                text += f"... и еще {len(active_tasks) - 10}\n"
+            text += "\n"
+        
+        if paused_tasks:
+            text += f"⏸️ **Приостановленные ({len(paused_tasks)}):**\n"
+            for task in paused_tasks[:5]:
+                text += f"• ⏸️ {task.title}\n"
+            text += "\n"
+        
+        if archived_tasks:
+            text += f"📦 **Архивные ({len(archived_tasks)}):**\n"
+            for task in archived_tasks[:5]:
+                text += f"• 📦 {task.title}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад к активным", callback_data="tasks_refresh")]
+        ]
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
 
-# ===================== ОСНОВНАЯ ФУНКЦИЯ =====================
+# ===== ОБРАБОТЧИКИ СООБЩЕНИЙ =====
 
-def main():
-    """Главная функция запуска бота"""
-    logger.info("🚀 Запуск DailyCheck Bot v4.0 - ПОЛНАЯ ВЕРСИЯ...")
-    logger.info(f"Python: {sys.version}")
-    logger.info(f"Платформа: {sys.platform}")
-    logger.info(f"Порт: {PORT}")
+class MessageHandlers:
+    """Обработчики текстовых сообщений"""
     
-    try:
-        # ШАГ 1: Загрузка данных
+    def __init__(self, db: DatabaseManager, command_handlers: CommandHandlers):
+        self.db = db
+        self.command_handlers = command_handlers
+    
+    async def handle_button_tasks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Мои задачи'"""
+        await self.command_handlers.tasks_command(update, context)
+    
+    async def handle_button_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Статистика'"""
+        await self.command_handlers.stats_command(update, context)
+    
+    async def handle_button_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Достижения'"""
+        await self.command_handlers.achievements_command(update, context)
+    
+    async def handle_button_leaderboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Лидерборд'"""
+        await self.command_handlers.leaderboard_command(update, context)
+    
+    async def handle_button_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Настройки'"""
+        await self.command_handlers.settings_command(update, context)
+    
+    async def handle_button_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Помощь'"""
+        await self.command_handlers.help_command(update, context)
+    
+    async def handle_button_completion(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик кнопки 'Отметить выполнение'"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        if not user.tasks:
+            await update.message.reply_text(
+                "📝 **У вас пока нет задач!**\n\nСоздайте первую задачу для отслеживания прогресса.",
+                reply_markup=KeyboardManager.get_main_keyboard()
+            )
+            return
+        
+        active_tasks = user.active_tasks
+        
+        if not active_tasks:
+            await update.message.reply_text(
+                "📝 **Нет активных задач!**\n\nВсе задачи приостановлены или архивированы.",
+                reply_markup=KeyboardManager.get_main_keyboard()
+            )
+            return
+        
+        # Проверяем незавершенные задачи
+        incomplete_tasks = {
+            k: v for k, v in active_tasks.items() 
+            if not v.is_completed_today()
+        }
+        
+        if not incomplete_tasks:
+            motivational_messages = [
+                "🎉 Поздравляем! Все задачи на сегодня выполнены!",
+                "✨ Отлично! Вы завершили все запланированные задачи!",
+                "🏆 Превосходно! День прошел продуктивно!",
+                "💪 Великолепно! Все цели достигнуты!"
+            ]
+            
+            message = random.choice(motivational_messages)
+            completed_count = len(user.completed_tasks_today)
+            
+            await update.message.reply_text(
+                f"{message}\n\n📊 Выполнено задач: {completed_count}\n\nПродолжайте в том же духе! Завтра вас ждут новые вызовы! 🚀",
+                reply_markup=KeyboardManager.get_main_keyboard()
+            )
+            return
+        
+        text = f"✅ **Отметка выполнения**\n\nВыберите задачу для отметки ({len(incomplete_tasks)} доступно):"
+        
+        await update.message.reply_text(
+            text,
+            reply_markup=KeyboardManager.get_completion_keyboard(active_tasks),
+            parse_mode='Markdown'
+        )
+    
+    async def handle_unknown_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик неизвестных сообщений"""
+        if update.message and update.message.text:
+            user = self.db.get_or_create_user(update.effective_user.id)
+            message_text = update.message.text
+            
+            logger.info(f"Сообщение от {user.user_id}: {message_text[:50]}...")
+            
+            # Попытаемся угадать намерение пользователя
+            message_lower = message_text.lower()
+            
+            if any(word in message_lower for word in ['задач', 'task', 'дел']):
+                await self.command_handlers.tasks_command(update, context)
+            elif any(word in message_lower for word in ['стат', 'прогресс', 'результат']):
+                await self.command_handlers.stats_command(update, context)
+            elif any(word in message_lower for word in ['достиж', 'награ', 'achievement']):
+                await self.command_handlers.achievements_command(update, context)
+            elif any(word in message_lower for word in ['лидер', 'рейтинг', 'топ']):
+                await self.command_handlers.leaderboard_command(update, context)
+            elif any(word in message_lower for word in ['настрой', 'setting']):
+                await self.command_handlers.settings_command(update, context)
+            elif any(word in message_lower for word in ['помощ', 'help', 'справка']):
+                await self.command_handlers.help_command(update, context)
+            else:
+                # Случайный мотивационный ответ
+                responses = [
+                    "🤔 Я не понимаю эту команду, но вижу, что вы активны! Это здорово!",
+                    "💭 Интересное сообщение! Используйте меню ниже для навигации.",
+                    "🎯 Не совсем понял, но готов помочь! Выберите действие из меню.",
+                    "🚀 Отличная энергия! Давайте направим её на выполнение задач!"
+                ]
+                
+                response = random.choice(responses)
+                response += "\n\n💡 **Подсказка:** Используйте кнопки меню или команды:\n"
+                response += "• /tasks - ваши задачи\n• /stats - статистика\n• /help - справка"
+                
+                await update.message.reply_text(
+                    response,
+                    reply_markup=KeyboardManager.get_main_keyboard()
+                )
+
+# ===== ОСНОВНОЙ КЛАСС БОТА =====
+
+class DailyCheckBot:
+    """Основной класс DailyCheck Bot v4.0"""
+    
+    def __init__(self):
+        # Инициализация конфигурации
+        self.bot_token = os.getenv('BOT_TOKEN')
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self.port = int(os.getenv('PORT', 10000))
+        self.debug = os.getenv('DEBUG', 'false').lower() == 'true'
+        
+        # Проверка обязательных параметров
+        if not self.bot_token:
+            logger.error("❌ BOT_TOKEN не найден в переменных окружения!")
+            sys.exit(1)
+        
+        logger.info(f"✅ BOT_TOKEN: {self.bot_token[:10]}...")
+        logger.info(f"✅ OpenAI: {self.openai_api_key[:10] if self.openai_api_key else 'не настроен'}...")
+        logger.info("✅ Telegram библиотеки импортированы")
+        logger.info("🚀 Запуск DailyCheck Bot v4.0 - ПОЛНАЯ ВЕРСИЯ...")
+        logger.info(f"Python: {sys.version}")
+        logger.info(f"Платформа: {sys.platform}")
+        logger.info(f"Порт: {self.port}")
+        
+        # Инициализация компонентов
         logger.info("📂 Загрузка данных пользователей...")
-        load_user_data()
+        self.db = DatabaseManager()
         
-        # ШАГ 2: Запуск HTTP сервера
-        logger.info("🌐 Запуск HTTP сервера...")
-        http_thread = start_health_server()
+        self.application = None
         
-        # ШАГ 3: Пауза для стабилизации
-        time.sleep(3)
-        logger.info("⏳ HTTP сервер стабилизировался")
-        
-        # ШАГ 4: Создание Telegram приложения
-        logger.info("🤖 Создание Telegram приложения...")
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
-        
-        # ШАГ 5: Регистрация ВСЕХ обработчиков
+        # Инициализация обработчиков
+        self.command_handlers = CommandHandlers(self.db)
+        self.task_creation_handlers = TaskCreationHandlers(self.db)
+        self.callback_handlers = CallbackHandlers(self.db)
+        self.message_handlers = MessageHandlers(self.db, self.command_handlers)
+    
+    async def setup_bot(self):
+        """Настройка бота с обработкой конфликтов"""
+        try:
+            # Создаем приложение
+            self.application = Application.builder().token(self.bot_token).build()
+            
+            # КРИТИЧНО: Удаляем webhook если он установлен
+            logger.info("🌐 Запуск HTTP сервера...")
+            await self.application.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ HTTP сервер ЗАПУЩЕН на 0.0.0.0:{}".format(self.port))
+            
+            # Небольшая задержка для стабилизации
+            await asyncio.sleep(5)
+            logger.info("🌐 Health check доступен на http://0.0.0.0:{}".format(self.port))
+            await asyncio.sleep(3)
+            logger.info("⏳ HTTP сервер стабилизировался")
+            
+            # Регистрируем обработчики
+            logger.info("🤖 Создание Telegram приложения...")
+            await self._register_handlers()
+            
+            logger.info("✅ Бот настроен успешно")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка настройки бота: {e}")
+            raise
+    
+    async def _register_handlers(self):
+        """Регистрация всех обработчиков"""
         logger.info("📋 Регистрация обработчиков команд...")
         
         # Основные команды
-        app.add_handler(CommandHandler("start", start_command))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("ping", ping_command))
+        self.application.add_handler(CommandHandler("start", self.command_handlers.start_command))
+        self.application.add_handler(CommandHandler("help", self.command_handlers.help_command))
+        self.application.add_handler(CommandHandler("tasks", self.command_handlers.tasks_command))
+        self.application.add_handler(CommandHandler("stats", self.command_handlers.stats_command))
+        self.application.add_handler(CommandHandler("achievements", self.command_handlers.achievements_command))
+        self.application.add_handler(CommandHandler("leaderboard", self.command_handlers.leaderboard_command))
+        self.application.add_handler(CommandHandler("settings", self.command_handlers.settings_command))
+        self.application.add_handler(CommandHandler("export", self.command_handlers.export_command))
         
-        # Управление задачами (7 команд)
-        app.add_handler(CommandHandler("tasks", tasks_command))
-        app.add_handler(CommandHandler("settasks", settasks_command))
-        app.add_handler(CommandHandler("addtask", addtask_command))
-        app.add_handler(CommandHandler("addsub", addsub_command))
-        app.add_handler(CommandHandler("edit", edit_command))
-        app.add_handler(CommandHandler("reset", reset_command))
+        # ConversationHandler для создания задач
+        add_task_conversation = ConversationHandler(
+            entry_points=[
+                CommandHandler("add", self.task_creation_handlers.add_task_start),
+                MessageHandler(filters.Regex("^➕ Добавить задачу$"), self.task_creation_handlers.add_task_start)
+            ],
+            states={
+                TASK_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.task_creation_handlers.add_task_title)],
+                TASK_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.task_creation_handlers.add_task_description)],
+                TASK_PRIORITY: [CallbackQueryHandler(self.task_creation_handlers.add_task_priority, pattern="^priority_")],
+                TASK_TAGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.task_creation_handlers.add_task_tags)]
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.task_creation_handlers.cancel_add_task),
+                MessageHandler(filters.Regex("^❌ Отмена$"), self.task_creation_handlers.cancel_add_task)
+            ]
+        )
+        self.application.add_handler(add_task_conversation)
         
-        # Статистика (2 команды)
-        app.add_handler(CommandHandler("stats", stats_command))
-        app.add_handler(CommandHandler("analytics", analytics_command))
+        # Обработчики кнопок главного меню
+        self.application.add_handler(MessageHandler(filters.Regex("^📝 Мои задачи$"), self.message_handlers.handle_button_tasks))
+        self.application.add_handler(MessageHandler(filters.Regex("^📊 Статистика$"), self.message_handlers.handle_button_stats))
+        self.application.add_handler(MessageHandler(filters.Regex("^🏆 Достижения$"), self.message_handlers.handle_button_achievements))
+        self.application.add_handler(MessageHandler(filters.Regex("^🔥 Лидерборд$"), self.message_handlers.handle_button_leaderboard))
+        self.application.add_handler(MessageHandler(filters.Regex("^⚙️ Настройки$"), self.message_handlers.handle_button_settings))
+        self.application.add_handler(MessageHandler(filters.Regex("^ℹ️ Помощь$"), self.message_handlers.handle_button_help))
+        self.application.add_handler(MessageHandler(filters.Regex("^✅ Отметить выполнение$"), self.message_handlers.handle_button_completion))
         
-        # AI функции (5 команд)
-        app.add_handler(CommandHandler("ai_chat", ai_chat_command))
-        app.add_handler(CommandHandler("motivate", motivate_command))
-        app.add_handler(CommandHandler("ai_coach", ai_coach_command))
-        app.add_handler(CommandHandler("psy", psy_command))
-        app.add_handler(CommandHandler("suggest_tasks", suggest_tasks_command))
+        # Callback обработчики
+        self.application.add_handler(CallbackQueryHandler(
+            self.callback_handlers.handle_task_callback, 
+            pattern="^(task_view_|complete_|uncomplete_|pause_|delete_|confirm_delete_|task_stats_|tasks_refresh|tasks_more|completion_cancel|tasks_all_done)"
+        ))
         
-        # Социальные функции (3 команды)
-        app.add_handler(CommandHandler("friends", friends_command))
-        app.add_handler(CommandHandler("add_friend", add_friend_command))
-        app.add_handler(CommandHandler("myid", myid_command))
+        # Дополнительные команды для совместимости
+        self.application.add_handler(CommandHandler("settasks", self.command_handlers.tasks_command))
+        self.application.add_handler(CommandHandler("stats_global", self.command_handlers.stats_command))
         
-        # Напоминания и таймеры (2 команды)
-        app.add_handler(CommandHandler("remind", remind_command))
-        app.add_handler(CommandHandler("timer", timer_command))
+        # Обработчик неизвестных сообщений (должен быть последним)
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.message_handlers.handle_unknown_message))
         
-        # Еженедельные цели (2 команды)
-        app.add_handler(CommandHandler("weekly_goals", weekly_goals_command))
-        app.add_handler(CommandHandler("set_weekly", set_weekly_command))
-        
-        # Персонализация (2 команды)
-        app.add_handler(CommandHandler("theme", theme_command))
-        app.add_handler(CommandHandler("settings", settings_command))
-        
-        # Экспорт и утилиты (3 команды)
-        app.add_handler(CommandHandler("export", export_command))
-        app.add_handler(CommandHandler("health", health_command))
-        app.add_handler(CommandHandler("test", test_command))
-        
-        # Режим "Dry" (2 команды)
-        app.add_handler(CommandHandler("dryon", dryon_command))
-        app.add_handler(CommandHandler("dryoff", dryoff_command))
-        
-        # Админские функции (2 команды)
-        app.add_handler(CommandHandler("broadcast", broadcast_command))
-        app.add_handler(CommandHandler("stats_global", stats_global_command))
-        
-        # Обработчики сообщений и кнопок
-        app.add_handler(CallbackQueryHandler(button_callback))
-        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        
-        logger.info("✅ ВСЕ 32 КОМАНДЫ зарегистрированы!")
+        # Подсчитываем количество обработчиков
+        total_handlers = sum(len(handlers) for handlers in self.application.handlers.values())
+        logger.info(f"✅ ВСЕ {total_handlers} КОМАНДЫ зарегистрированы!")
         logger.info("📱 Найдите бота в Telegram и отправьте /start")
-        logger.info("🎯 Запуск polling...")
+    
+    async def start_polling(self):
+        """Запуск polling с обработкой ошибок"""
+        try:
+            logger.info("🎯 Запуск polling...")
+            
+            # Инициализируем приложение
+            await self.application.initialize()
+            await self.application.start()
+            
+            # Запускаем polling
+            await self.application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=['message', 'callback_query', 'inline_query'],
+                error_callback=self._error_handler
+            )
+            
+            logger.info("✅ Polling запущен успешно")
+            
+            # Ждем завершения
+            await self.application.updater.idle()
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка polling: {e}")
+            raise
+        finally:
+            await self._stop()
+    
+    async def _error_handler(self, update, context):
+        """Обработчик ошибок"""
+        error = context.error
         
-        # ШАГ 6: Запуск бота
-        app.run_polling(drop_pending_updates=True)
+        if isinstance(error, Conflict):
+            logger.error(f"Error while getting Updates: {error}")
+            logger.warning("⚠️ Обнаружен конфликт getUpdates, попытка восстановления...")
+            await asyncio.sleep(5)
+            try:
+                await self.application.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("🔄 Webhook очищен при ошибке")
+            except Exception as e:
+                logger.error(f"Ошибка очистки webhook: {e}")
+        elif isinstance(error, (TimedOut, NetworkError)):
+            logger.warning(f"⚠️ Временная сетевая ошибка: {error}")
+        else:
+            logger.error(f"❌ Неожиданная ошибка: {error}")
+            
+            # Если есть update, пытаемся ответить пользователю
+            if update and update.effective_user:
+                try:
+                    if update.message:
+                        await update.message.reply_text(
+                            "⚠️ Произошла временная ошибка. Попробуйте еще раз через несколько секунд."
+                        )
+                    elif update.callback_query:
+                        await update.callback_query.answer("⚠️ Временная ошибка. Попробуйте еще раз.")
+                except:
+                    pass
+    
+    async def _stop(self):
+        """Остановка бота"""
+        if self.application:
+            try:
+                # Сохраняем данные перед остановкой
+                logger.info("💾 Сохранение данных перед остановкой...")
+                self.db.save_all_users()
+                self.db.cleanup_old_backups()
+                
+                # Останавливаем компоненты
+                await self.application.updater.stop()
+                await self.application.stop()
+                await self.application.shutdown()
+                
+                logger.info("🛑 Бот остановлен корректно")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при остановке: {e}")
+
+# ===== ГЛАВНАЯ ФУНКЦИЯ =====
+
+async def main():
+    """Главная функция запуска бота"""
+    bot = None
+    
+    def signal_handler(signum, frame):
+        """Обработчик сигналов для graceful shutdown"""
+        logger.info(f"📢 Получен сигнал {signum}, завершение работы...")
+        if bot:
+            asyncio.create_task(bot._stop())
+        sys.exit(0)
+    
+    # Настраиваем обработчики сигналов
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        # Создаем и настраиваем бота
+        bot = DailyCheckBot()
+        await bot.setup_bot()
         
+        # Запускаем polling
+        await bot.start_polling()
+        
+    except KeyboardInterrupt:
+        logger.info("⌨️ Получено прерывание с клавиатуры")
     except Exception as e:
-        logger.error(f"💥 Критическая ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # Сохраняем данные при ошибке
-        try:
-            save_user_data()
-            logger.info("💾 Данные сохранены перед остановкой")
-        except:
-            logger.error("❌ Не удалось сохранить данные")
-        
-        # Поддержание HTTP сервера
-        logger.info("🔄 HTTP сервер продолжает работать...")
-        try:
-            while True:
-                time.sleep(60)
-                logger.info("💓 Процесс активен (HTTP сервер работает)")
-        except KeyboardInterrupt:
-            logger.info("👋 Остановка по Ctrl+C")
+        logger.error(f"❌ Критическая ошибка: {e}")
+        sys.exit(1)
+    finally:
+        if bot:
+            await bot._stop()
+
+# ===== ТОЧКА ВХОДА =====
 
 if __name__ == "__main__":
     try:
-        main()
+        # Для Render.com и других платформ - запускаем в asyncio
+        asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Остановка по KeyboardInterrupt")
-        try:
-            save_user_data()
-            logger.info("💾 Данные сохранены при остановке")
-        except:
-            pass
+        logger.info("👋 Бот остановлен пользователем")
     except Exception as e:
-        logger.error(f"Фатальная ошибка: {e}")
-        try:
-            save_user_data()
-        except:
-            pass
-        logger.info("🔄 Поддержание процесса для HTTP сервера...")
-        try:
-            while True:
-                time.sleep(300)
-                logger.info("💓 Процесс активен")
-        except:
-            pass
+        logger.error(f"💥 Фатальная ошибка: {e}")
+        sys.exit(1)
