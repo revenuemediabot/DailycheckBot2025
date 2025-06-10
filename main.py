@@ -2341,7 +2341,9 @@ class DailyCheckBot:
         
         # Добавление друга
         add_friend_handler = ConversationHandler(
-            entry_points=[CommandHandler("add_friend", self.add_friend_start)],
+            entry_points=[
+                MessageHandler(filters.Regex("👥 Добавление друга"), self.add_friend_start)
+            ],
             states={
                 self.FRIEND_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_friend_id)]
             },
@@ -2351,7 +2353,9 @@ class DailyCheckBot:
         
         # Создание напоминания
         reminder_handler = ConversationHandler(
-            entry_points=[CommandHandler("remind", self.remind_start)],
+            entry_points=[
+                MessageHandler(filters.Regex("🔔 Создание напоминания"), self.remind_message_start)
+            ],
             states={
                 self.REMINDER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.remind_message)],
                 self.REMINDER_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.remind_time)]
@@ -2872,6 +2876,86 @@ class DailyCheckBot:
         
         await update.message.reply_text(id_text, parse_mode='Markdown')
     
+    async def remind_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /remind - создать напоминание"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        if context.args:
+            # Быстрое создание напоминания из аргументов
+            # Формат: /remind 09:30 Выпить воду
+            try:
+                time_arg = context.args[0]
+                message_arg = ' '.join(context.args[1:]) if len(context.args) > 1 else "Напоминание"
+                
+                # Проверяем формат времени
+                time_parts = time_arg.split(':')
+                if len(time_parts) == 2:
+                    hour, minute = int(time_parts[0]), int(time_parts[1])
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        reminder_id = user.add_reminder(
+                            title="Напоминание",
+                            message=message_arg,
+                            trigger_time=time_arg,
+                            is_recurring=True
+                        )
+                        
+                        self.db.save_user(user)
+                        
+                        await update.message.reply_text(
+                            f"✅ **Напоминание создано!**\n\n🕐 Время: {time_arg}\n📝 Сообщение: {message_arg}\n\nВы будете получать это напоминание каждый день.",
+                            reply_markup=KeyboardManager.get_main_keyboard()
+                        )
+                        return
+            except (ValueError, IndexError):
+                pass
+        
+        # Запускаем ConversationHandler для детального создания
+        await update.message.reply_text(
+            "🔔 **Создание напоминания**\n\n💡 **Быстрый формат:** `/remind 09:30 Выпить воду`\n\nИли введите текст напоминания:",
+            parse_mode='Markdown'
+        )
+    
+    async def add_friend_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /add_friend - добавить друга"""
+        user = self.db.get_or_create_user(update.effective_user.id)
+        
+        if context.args:
+            # Быстрое добавление друга из аргументов
+            try:
+                friend_id = int(context.args[0])
+                
+                if friend_id == user.user_id:
+                    await update.message.reply_text("❌ Нельзя добавить самого себя в друзья!")
+                    return
+                
+                # Проверяем, существует ли пользователь
+                friend = self.db.get_user(friend_id)
+                if not friend:
+                    await update.message.reply_text("❌ Пользователь с таким ID не найден!")
+                    return
+                
+                # Добавляем друга
+                if user.add_friend(friend_id, friend.username, friend.first_name):
+                    self.db.save_user(user)
+                    
+                    friend_name = friend.display_name
+                    await update.message.reply_text(
+                        f"✅ **Друг добавлен!**\n\n👤 {friend_name} теперь в вашем списке друзей.",
+                        reply_markup=KeyboardManager.get_main_keyboard()
+                    )
+                else:
+                    await update.message.reply_text("❌ Этот пользователь уже в списке ваших друзей!")
+                return
+                    
+            except (ValueError, IndexError):
+                await update.message.reply_text("❌ Неверный формат ID! Используйте: `/add_friend 123456789`")
+                return
+        
+        # Запускаем ConversationHandler для ввода ID
+        await update.message.reply_text(
+            "👥 **Добавление друга**\n\n💡 **Быстрый формат:** `/add_friend 123456789`\n\nИли введите ID пользователя:"
+        )
+    
     # ===== БЫСТРЫЕ КОМАНДЫ =====
     
     async def settasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3268,8 +3352,8 @@ class DailyCheckBot:
         
         return ConversationHandler.END
     
-    async def remind_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Начало создания напоминания"""
+    async def remind_message_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начало создания напоминания через ConversationHandler"""
         await update.message.reply_text(
             "🔔 **Создание напоминания**\n\nВведите текст напоминания:"
         )
@@ -3323,6 +3407,13 @@ class DailyCheckBot:
             return self.REMINDER_TIME
         
         return ConversationHandler.END
+    
+    async def add_friend_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начало добавления друга через ConversationHandler"""
+        await update.message.reply_text(
+            "👥 **Добавление друга**\n\nВведите ID пользователя, которого хотите добавить в друзья:"
+        )
+        return self.FRIEND_ID
     
     async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Отмена диалога"""
@@ -3515,7 +3606,379 @@ class DailyCheckBot:
         else:
             await query.edit_message_text("❌ Ошибка при отмене выполнения.")
     
+    async def _handle_task_delete_confirm(self, query, user: User, data: str):
+        """Подтверждение удаления задачи"""
+        task_id = data.replace("confirm_delete_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        task_title = task.title
+        
+        # Удаляем задачу
+        del user.tasks[task_id]
+        user.stats.total_tasks = max(0, user.stats.total_tasks - 1)
+        
+        self.db.save_user(user)
+        
+        await query.edit_message_text(
+            f"🗑️ **Задача удалена**\n\n{task_title}\n\nВсе данные о выполнении были удалены."
+        )
+        
+        logger.info(f"Пользователь {user.user_id} удалил задачу: {task_title}")
+    
+    async def _handle_task_delete(self, query, user: User, data: str):
+        """Удаление задачи с подтверждением"""
+        task_id = data.replace("delete_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        task_title = task.title
+        
+        # Создаем клавиатуру подтверждения
+        keyboard = [
+            [
+                InlineKeyboardButton("🗑️ Да, удалить", callback_data=f"confirm_delete_{task_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"task_view_{task_id}")
+            ]
+        ]
+        
+        await query.edit_message_text(
+            f"⚠️ **Подтвердите удаление**\n\n🗑️ {task_title}\n\n**Внимание:** Все данные о выполнении будут потеряны!",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    async def _handle_task_pause(self, query, user: User, data: str):
+        """Приостановка задачи"""
+        task_id = data.replace("pause_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        task.status = "paused"
+        self.db.save_user(user)
+        
+        await query.edit_message_text(
+            f"⏸️ **Задача приостановлена**\n\n{task.title}\n\nВы можете активировать её позже через настройки."
+        )
+        
+        logger.info(f"Пользователь {user.user_id} приостановил задачу: {task.title}")
+    
+    async def _handle_add_subtask(self, query, user: User, data: str):
+        """Добавление подзадачи"""
+        task_id = data.replace("add_subtask_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        
+        # Простое добавление подзадачи (в реальной реализации можно через ConversationHandler)
+        subtask_title = f"Подзадача {len(task.subtasks) + 1}"
+        subtask_id = task.add_subtask(subtask_title)
+        
+        self.db.save_user(user)
+        
+        await query.edit_message_text(
+            f"✅ **Подзадача добавлена!**\n\n📋 {task.title}\n➕ {subtask_title}\n\nВсего подзадач: {len(task.subtasks)}"
+        )
+    
+    async def _handle_task_stats(self, query, user: User, data: str):
+        """Статистика конкретной задачи"""
+        task_id = data.replace("task_stats_", "")
+        
+        if task_id not in user.tasks:
+            await query.edit_message_text("❌ Задача не найдена!")
+            return
+        
+        task = user.tasks[task_id]
+        
+        # Подробная статистика
+        total_completions = len([c for c in task.completions if c.completed])
+        total_days = (datetime.now() - datetime.fromisoformat(task.created_at)).days + 1
+        overall_rate = (total_completions / total_days) * 100 if total_days > 0 else 0
+        
+        # Последние выполнения
+        recent_completions = [
+            c for c in task.completions 
+            if c.completed and date.fromisoformat(c.date) >= date.today() - timedelta(days=30)
+        ]
+        
+        theme = ThemeManager.get_theme(user.settings.theme)
+        
+        stats_text = f"""📊 **Статистика задачи**
+
+📝 {task.title}
+
+🎯 **Общая статистика:**
+• Всего выполнений: {total_completions}
+• Дней с создания: {total_days}
+• Общий процент: {overall_rate:.1f}%
+
+{theme['streak_icon']} **Streak информация:**
+• Текущий streak: {task.current_streak} дней
+• Статус: {'✅ Выполнено сегодня' if task.is_completed_today() else '⭕ Не выполнено сегодня'}
+
+📈 **По периодам:**
+• За неделю: {task.completion_rate_week:.1f}%
+• За месяц: {task.completion_rate_month:.1f}%
+• За 30 дней: {len(recent_completions)} выполнений
+
+📅 **Создана:** {datetime.fromisoformat(task.created_at).strftime('%d.%m.%Y')}
+
+{theme['xp_icon']} **XP за выполнение:** {task.xp_value}"""
+        
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад к задаче", callback_data=f"task_view_{task_id}")]
+        ]
+        
+        await query.edit_message_text(
+            stats_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    async def _handle_tasks_more(self, query, user: User):
+        """Показать больше задач"""
+        all_tasks = user.tasks
+        
+        text = f"📝 **Все ваши задачи ({len(all_tasks)}):**\n\n"
+        
+        # Группируем по статусу
+        active_tasks = [t for t in all_tasks.values() if t.status == "active"]
+        paused_tasks = [t for t in all_tasks.values() if t.status == "paused"]
+        archived_tasks = [t for t in all_tasks.values() if t.status == "archived"]
+        
+        theme = ThemeManager.get_theme(user.settings.theme)
+        
+        if active_tasks:
+            text += f"⭕ **Активные ({len(active_tasks)}):**\n"
+            for task in active_tasks[:10]:
+                status_emoji = theme["task_completed"] if task.is_completed_today() else theme["task_pending"]
+                text += f"• {status_emoji} {task.title} ({theme['streak_icon']}{task.current_streak})\n"
+            
+            if len(active_tasks) > 10:
+                text += f"... и еще {len(active_tasks) - 10}\n"
+            text += "\n"
+        
+        if paused_tasks:
+            text += f"⏸️ **Приостановленные ({len(paused_tasks)}):**\n"
+            for task in paused_tasks[:5]:
+                text += f"• ⏸️ {task.title}\n"
+            text += "\n"
+        
+        if archived_tasks:
+            text += f"📦 **Архивные ({len(archived_tasks)}):**\n"
+            for task in archived_tasks[:5]:
+                text += f"• 📦 {task.title}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад к активным", callback_data="tasks_refresh")]
+        ]
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    async def _handle_friends_callback(self, query, user: User, data: str):
+        """Обработка действий с друзьями"""
+        if data == "friends_list":
+            if not user.friends:
+                await query.edit_message_text("👥 У вас пока нет друзей!\n\nДобавьте первого командой /add_friend")
+                return
+            
+            friends_text = f"👥 **Ваши друзья ({len(user.friends)}):**\n\n"
+            
+            for friend in user.friends:
+                friend_user = self.db.get_user(friend.user_id)
+                if friend_user:
+                    friends_text += f"• {friend_user.display_name} (Ур.{friend_user.stats.level})\n"
+                else:
+                    friend_name = friend.first_name or f"@{friend.username}" if friend.username else f"ID {friend.user_id}"
+                    friends_text += f"• {friend_name}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("⬅️ Назад", callback_data="friends_main")]
+            ]
+            
+            await query.edit_message_text(
+                friends_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        
+        elif data == "friends_compare":
+            if not user.friends:
+                await query.edit_message_text("👥 Добавьте друзей для сравнения достижений!")
+                return
+            
+            compare_text = f"🏆 **Сравнение достижений**\n\n**Вы:** {len(user.achievements)} достижений\n\n"
+            
+            for friend in user.friends[:5]:  # Первые 5 друзей
+                friend_user = self.db.get_user(friend.user_id)
+                if friend_user:
+                    compare_text += f"• {friend_user.display_name}: {len(friend_user.achievements)} достижений\n"
+            
+            await query.edit_message_text(compare_text, parse_mode='Markdown')
+        
+        elif data == "friends_leaderboard":
+            friends_users = []
+            for friend in user.friends:
+                friend_user = self.db.get_user(friend.user_id)
+                if friend_user:
+                    friends_users.append(friend_user)
+            
+            if not friends_users:
+                await query.edit_message_text("👥 Нет данных о друзьях для составления рейтинга.")
+                return
+            
+            # Добавляем себя в список
+            friends_users.append(user)
+            
+            leaderboard_text = MessageFormatter.format_leaderboard(friends_users, user.user_id)
+            
+            await query.edit_message_text(leaderboard_text, parse_mode='Markdown')
+    
+    async def _handle_settings_callback(self, query, user: User, data: str):
+        """Обработка настроек"""
+        if data == "settings_theme":
+            current_theme = ThemeManager.get_theme(user.settings.theme)
+            
+            theme_text = f"""🎨 **Смена темы**
+
+📱 **Текущая тема:** {current_theme['name']}
+
+Выберите новую тему:"""
+            
+            await query.edit_message_text(
+                theme_text,
+                reply_markup=ThemeManager.get_themes_keyboard(),
+                parse_mode='Markdown'
+            )
+        
+        elif data == "settings_ai":
+            ai_text = f"""🤖 **AI настройки**
+
+• AI-чат: {'✅ Включен' if user.settings.ai_chat_enabled else '❌ Выключен'}
+
+AI-чат позволяет общаться с ботом как с умным ассистентом. Бот будет понимать ваши сообщения и отвечать персональными советами."""
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "❌ Выключить AI" if user.settings.ai_chat_enabled else "✅ Включить AI",
+                    callback_data="toggle_ai_chat"
+                )],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="settings_refresh")]
+            ]
+            
+            await query.edit_message_text(
+                ai_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        
+        elif data == "settings_dry_mode":
+            dry_text = f"""🚭 **Режим "трезвости"**
+
+• Статус: {'✅ Включен' if user.settings.dry_mode_enabled else '❌ Выключен'}
+• Дней без алкоголя: {user.stats.dry_days}
+
+Этот режим помогает отслеживать дни без употребления алкоголя."""
+            
+            keyboard = [
+                [InlineKeyboardButton(
+                    "❌ Выключить режим" if user.settings.dry_mode_enabled else "✅ Включить режим",
+                    callback_data="toggle_dry_mode"
+                )],
+                [InlineKeyboardButton("🔄 Сбросить счетчик", callback_data="reset_dry_counter")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="settings_refresh")]
+            ]
+            
+            await query.edit_message_text(
+                dry_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        
+        elif data == "toggle_ai_chat":
+            user.settings.ai_chat_enabled = not user.settings.ai_chat_enabled
+            self.db.save_user(user)
+            
+            status = "включен" if user.settings.ai_chat_enabled else "выключен"
+            await query.edit_message_text(f"🤖 AI-чат {status}!")
+        
+        elif data == "toggle_dry_mode":
+            user.settings.dry_mode_enabled = not user.settings.dry_mode_enabled
+            if user.settings.dry_mode_enabled and user.stats.dry_days == 0:
+                user.stats.dry_days = 1  # Начинаем с первого дня
+            self.db.save_user(user)
+            
+            status = "включен" if user.settings.dry_mode_enabled else "выключен"
+            await query.edit_message_text(f"🚭 Режим трезвости {status}!")
+        
+        elif data == "reset_dry_counter":
+            user.stats.dry_days = 0
+            self.db.save_user(user)
+            await query.edit_message_text("🔄 Счетчик дней трезвости сброшен.")
+        
+        elif data == "settings_refresh":
+            # Обновляем настройки
+            await self.settings_command(
+                type('Update', (), {'effective_user': type('User', (), {'id': user.user_id})()})(),
+                None
+            )
+        
+        # Сохраняем изменения
+        self.db.save_user(user)
+    
     async def _handle_tasks_refresh(self, query, user: User):
+        """Обновление списка задач"""
+        active_tasks = user.active_tasks
+        
+        if not active_tasks:
+            await query.edit_message_text("📝 У вас нет активных задач!")
+            return
+        
+        completed_today = len(user.completed_tasks_today)
+        completion_percentage = (completed_today / len(active_tasks)) * 100
+        theme = ThemeManager.get_theme(user.settings.theme)
+        
+        text = f"📝 **Ваши активные задачи ({len(active_tasks)}):**\n\n"
+        text += f"📊 Прогресс сегодня: {completed_today}/{len(active_tasks)} ({completion_percentage:.0f}%)\n\n"
+        
+        # Краткий список
+        for i, (task_id, task) in enumerate(list(active_tasks.items())[:5], 1):
+            status_emoji = theme["task_completed"] if task.is_completed_today() else theme["task_pending"]
+            priority_emoji = {
+                "high": theme["priority_high"],
+                "medium": theme["priority_medium"], 
+                "low": theme["priority_low"]
+            }.get(task.priority, theme["priority_medium"])
+            
+            text += f"{i}. {status_emoji} {priority_emoji} {task.title}\n"
+            text += f"   {theme['streak_icon']} Streak: {task.current_streak} | 📈 Неделя: {task.completion_rate_week:.0f}%\n\n"
+        
+        if len(active_tasks) > 5:
+            text += f"... и еще {len(active_tasks) - 5} задач\n\n"
+        
+        text += "Выберите задачу для подробной информации:"
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=KeyboardManager.get_tasks_inline_keyboard(active_tasks, user),
+            parse_mode='Markdown'
+        )
         """Обновление списка задач"""
         active_tasks = user.active_tasks
         
