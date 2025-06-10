@@ -50,6 +50,7 @@ import socketserver
 # Внешние библиотеки
 try:
     import openai
+    from openai import AsyncOpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -1224,8 +1225,8 @@ class AIService:
         
         if self.enabled:
             try:
-                openai.api_key = BotConfig.OPENAI_API_KEY
-                self.client = openai
+                from openai import AsyncOpenAI
+                self.client = AsyncOpenAI(api_key=BotConfig.OPENAI_API_KEY)
                 logger.info("🤖 AI сервис инициализирован")
             except Exception as e:
                 logger.error(f"❌ Ошибка инициализации AI: {e}")
@@ -1305,7 +1306,7 @@ class AIService:
             messages.append({"role": "user", "content": message})
             
             # Отправляем запрос к OpenAI
-            response = await self.client.ChatCompletion.acreate(
+            response = await self.client.chat.completions.create(
                 model=BotConfig.OPENAI_MODEL,
                 messages=messages,
                 max_tokens=BotConfig.OPENAI_MAX_TOKENS,
@@ -1483,7 +1484,7 @@ class AIService:
 - Каждая задача в одну строку
 - Без нумерации и дополнительных символов"""
             
-            response = await self.client.ChatCompletion.acreate(
+            response = await self.client.chat.completions.create(
                 model=BotConfig.OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
@@ -2424,9 +2425,9 @@ class DailyCheckBot:
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /help"""
-        help_text = """📖 **Справка по DailyCheck Bot v4.0**
+        help_text = """📖 Справка по DailyCheck Bot v4.0
 
-🔹 **Основные команды:**
+🔹 Основные команды:
 /start - Главное меню
 /tasks - Список ваших задач
 /add - Добавить новую задачу  
@@ -2435,38 +2436,38 @@ class DailyCheckBot:
 /friends - Управление друзьями
 /export - Экспорт данных
 
-🔹 **AI функции:**
+🔹 AI функции:
 /ai_chat - Включить/выключить AI-чат
 /motivate - Получить мотивацию
 /ai_coach - Персональный коуч
 /psy - Психологическая поддержка
 /suggest_tasks - AI предложит задачи
 
-🔹 **Утилиты:**
+🔹 Утилиты:
 /timer - Установить таймер (Pomodoro и др.)
 /remind - Создать напоминание
 /theme - Сменить тему оформления
 /myid - Узнать свой ID
 
-🔹 **Быстрые команды:**
+🔹 Быстрые команды:
 /settasks - Быстро создать несколько задач
 /weekly_goals - Еженедельные цели
 /analytics - Продвинутая аналитика
 
-🔹 **Система XP и уровней:**
+🔹 Система XP и уровней:
 • Выполняйте задачи и получайте XP
 • Повышайте уровень и открывайте достижения
 • Соревнуйтесь с друзьями в лидерборде
 
-🔹 **AI-чат режим:**
+🔹 AI-чат режим:
 После /ai_chat пишите боту обычные сообщения:
 • "Мотивируй меня" → поддержка
 • "Как планировать день?" → советы
 • "Устал от работы" → психологическая помощь
 
-💡 **Совет:** Используйте кнопки для быстрого доступа!"""
+💡 Совет: Используйте кнопки для быстрого доступа!"""
         
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text(help_text)
     
     async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /tasks - показать список задач"""
@@ -3385,9 +3386,11 @@ class DailyCheckBot:
             
             user = self.db.get_or_create_user(update.effective_user.id)
             
+            reminder_message = context.user_data['reminder_message']
+            
             reminder_id = user.add_reminder(
                 title="Напоминание",
-                message=context.user_data['reminder_message'],
+                message=reminder_message,
                 trigger_time=time_text,
                 is_recurring=True
             )
@@ -3396,7 +3399,7 @@ class DailyCheckBot:
             context.user_data.clear()
             
             await update.message.reply_text(
-                f"✅ **Напоминание создано!**\n\n🕐 Время: {time_text}\n📝 Сообщение: {context.user_data.get('reminder_message', 'Напоминание')}\n\nВы будете получать это напоминание каждый день.",
+                f"✅ **Напоминание создано!**\n\n🕐 Время: {time_text}\n📝 Сообщение: {reminder_message}\n\nВы будете получать это напоминание каждый день.",
                 reply_markup=KeyboardManager.get_main_keyboard()
             )
             
