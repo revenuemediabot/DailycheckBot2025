@@ -1,0 +1,65 @@
+# Telegram Bot
+python-telegram-bot==20.7
+python-telegram-bot[webhooks]==20.7
+
+# FastAPI и веб-фреймворк (для webhook и API)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Шаблоны и статические файлы
+jinja2==3.1.2
+aiofiles==23.2.1
+
+# Валидация данных
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# HTTP клиент
+httpx==0.25.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Работа с данными
+orjson==3.9.10
+python-dateutil==2.8.2
+
+# Криптография и безопасность
+cryptography==41.0.8
+python-jose[cryptography]==3.3.0
+
+# Логирование
+structlog==23.2.0
+
+# Утилиты
+click==8.1.7
+rich==13.7.0
+
+# Асинхронность
+asyncio-throttle==1.0.2
+
+# Для работы с изображениями (если потребуется)
+Pillow==10.1.0
+
+# Планировщик задач
+APScheduler==3.10.4
+
+# Валидация URL и email
+validators==0.22.0
+
+# Парсинг и обработка текста
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# Работа с временными зонами
+pytz==2023.3
+
+# Дополнительные утилиты
+urllib3==2.1.0
+certifi==2023.11.17
+
+# Опциональные зависимости
+# redis==5.0.1  # Для кэширования
+# psycopg2-binary==2.9.9  # Для PostgreSQL
+# aiomysql==0.2.0  # Для MySQL
+# motor==3.3.2  # Для MongoDB
