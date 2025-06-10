@@ -17,4 +17,7 @@ psycopg2-binary>=2.9.0
 databases[postgresql,sqlite]>=0.8.0
 fastapi>=0.104.1
 uvicorn>=0.24.0
+redis>=5.0.0
+aioredis>=2.0.0
+diskcache>=5.6.0  # Альтернатива Redis
 
