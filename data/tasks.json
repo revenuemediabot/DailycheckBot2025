@@ -1,0 +1,533 @@
+{
+  "task_001": {
+    "task_id": "task_001",
+    "title": "Первое знакомство",
+    "description": "Изучите основные функции бота и настройте свой профиль. Это поможет вам начать эффективно использовать все возможности системы.",
+    "category": "Обучение",
+    "difficulty": "easy",
+    "xp_reward": 50,
+    "is_active": true,
+    "is_featured": true,
+    "is_daily": false,
+    "is_weekly": false,
+    "time_limit": 30,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": [],
+    "requirements": [
+      {
+        "requirement_id": "req_001_1",
+        "description": "Прочитать приветственное сообщение",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_001_2", 
+        "description": "Установить аватар профиля",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_001_1",
+        "content": "Используйте команду /profile для настройки профиля",
+        "unlock_condition": "after_5_minutes",
+        "xp_cost": 0
+      }
+    ],
+    "rewards": {
+      "xp": 50,
+      "bonus_xp": 25,
+      "items": ["welcome_badge"],
+      "achievement_id": "first_task"
+    },
+    "tags": ["новичок", "базовые", "профиль"],
+    "created_at": "2023-12-01T00:00:00",
+    "updated_at": "2024-01-15T10:00:00",
+    "created_by": "system",
+    "completion_count": 4,
+    "average_completion_time": 18.5,
+    "success_rate": 100.0,
+    "average_rating": 4.75,
+    "resources": [
+      "https://example.com/guide/getting-started",
+      "https://example.com/video/intro"
+    ],
+    "examples": [
+      "Пример: Нажмите /start и следуйте инструкциям",
+      "Пример: Загрузите фото для аватара"
+    ],
+    "custom_data": {
+      "tutorial_step": 1,
+      "estimated_time": "15-30 минут"
+    }
+  },
+  "task_002": {
+    "task_id": "task_002",
+    "title": "Настройка профиля",
+    "description": "Полностью настройте свой профиль: добавьте информацию о себе, выберите предпочтения уведомлений и часовой пояс.",
+    "category": "Настройки",
+    "difficulty": "medium",
+    "xp_reward": 100,
+    "is_active": true,
+    "is_featured": false,
+    "is_daily": false,
+    "is_weekly": false,
+    "time_limit": 45,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": ["task_001"],
+    "requirements": [
+      {
+        "requirement_id": "req_002_1",
+        "description": "Заполнить имя и фамилию",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_002_2",
+        "description": "Выбрать часовой пояс",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_002_3",
+        "description": "Настроить уведомления",
+        "is_mandatory": false,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_002_1",
+        "content": "Используйте /settings для доступа к настройкам",
+        "unlock_condition": null,
+        "xp_cost": 0
+      }
+    ],
+    "rewards": {
+      "xp": 100,
+      "bonus_xp": 0,
+      "items": ["settings_master"],
+      "achievement_id": null
+    },
+    "tags": ["настройки", "профиль", "персонализация"],
+    "created_at": "2023-12-01T00:00:00",
+    "updated_at": "2024-02-01T12:00:00",
+    "created_by": "system",
+    "completion_count": 2,
+    "average_completion_time": 25.0,
+    "success_rate": 95.0,
+    "average_rating": 4.5,
+    "resources": [
+      "https://example.com/guide/profile-setup"
+    ],
+    "examples": [
+      "Введите свое настоящее имя для персонализации",
+      "Выберите часовой пояс для точных уведомлений"
+    ],
+    "custom_data": {
+      "tutorial_step": 2
+    }
+  },
+  "task_003": {
+    "task_id": "task_003", 
+    "title": "Ежедневная проверка",
+    "description": "Выполните ежедневную проверку системы. Проверьте новые уведомления, обновления и выполните минимальные действия для поддержания активности.",
+    "category": "Ежедневные",
+    "difficulty": "easy",
+    "xp_reward": 25,
+    "is_active": true,
+    "is_featured": false,
+    "is_daily": true,
+    "is_weekly": false,
+    "time_limit": 10,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": [],
+    "requirements": [
+      {
+        "requirement_id": "req_003_1",
+        "description": "Проверить уведомления",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_003_2",
+        "description": "Выполнить одно действие в боте",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      }
+    ],
+    "hints": [],
+    "rewards": {
+      "xp": 25,
+      "bonus_xp": 5,
+      "items": [],
+      "achievement_id": null
+    },
+    "tags": ["ежедневные", "активность", "простые"],
+    "created_at": "2024-01-01T00:00:00",
+    "updated_at": null,
+    "created_by": "system",
+    "completion_count": 1,
+    "average_completion_time": 5.2,
+    "success_rate": 100.0,
+    "average_rating": 5.0,
+    "resources": [],
+    "examples": [
+      "Зайдите в бот и проверьте главное меню",
+      "Откройте раздел уведомлений"
+    ],
+    "custom_data": {
+      "daily_reset": true,
+      "streak_eligible": true
+    }
+  },
+  "task_004": {
+    "task_id": "task_004",
+    "title": "Изучение функций",
+    "description": "Детально изучите все доступные функции бота. Протестируйте каждый раздел меню и изучите возможности системы.",
+    "category": "Обучение",
+    "difficulty": "hard",
+    "xp_reward": 200,
+    "is_active": true,
+    "is_featured": true,
+    "is_daily": false,
+    "is_weekly": false,
+    "time_limit": 90,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": ["task_001", "task_002"],
+    "requirements": [
+      {
+        "requirement_id": "req_004_1",
+        "description": "Изучить все разделы меню",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      },
+      {
+        "requirement_id": "req_004_2",
+        "description": "Протестировать 5 различных команд",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_004_3",
+        "description": "Оставить отзыв о функциональности",
+        "is_mandatory": false,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_004_1",
+        "content": "Начните с команды /help для получения списка всех команд",
+        "unlock_condition": null,
+        "xp_cost": 0
+      },
+      {
+        "hint_id": "hint_004_2",
+        "content": "Используйте /menu для навигации по разделам",
+        "unlock_condition": "after_10_minutes",
+        "xp_cost": 10
+      }
+    ],
+    "rewards": {
+      "xp": 200,
+      "bonus_xp": 50,
+      "items": ["explorer_badge", "function_master"],
+      "achievement_id": null
+    },
+    "tags": ["обучение", "функции", "продвинутые", "исследование"],
+    "created_at": "2024-01-10T00:00:00",
+    "updated_at": "2024-03-01T15:30:00",
+    "created_by": "admin",
+    "completion_count": 1,
+    "average_completion_time": 65.0,
+    "success_rate": 85.0,
+    "average_rating": 3.0,
+    "resources": [
+      "https://example.com/guide/advanced-features",
+      "https://example.com/video/full-tour"
+    ],
+    "examples": [
+      "Используйте каждую кнопку в главном меню",
+      "Протестируйте команды: /stats, /leaderboard, /tasks, /profile, /settings"
+    ],
+    "custom_data": {
+      "complexity_level": "high",
+      "estimated_time": "60-90 минут"
+    }
+  },
+  "task_005": {
+    "task_id": "task_005",
+    "title": "Помощь новичкам",
+    "description": "Помогите трем новым пользователям освоиться в системе. Ответьте на их вопросы и поделитесь полезными советами.",
+    "category": "Модерация",
+    "difficulty": "medium",
+    "xp_reward": 150,
+    "is_active": true,
+    "is_featured": false,
+    "is_daily": false,
+    "is_weekly": true,
+    "time_limit": null,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": ["task_004"],
+    "requirements": [
+      {
+        "requirement_id": "req_005_1",
+        "description": "Помочь 3 новым пользователям",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      },
+      {
+        "requirement_id": "req_005_2",
+        "description": "Получить положительную оценку от помощи",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_005_1",
+        "content": "Следите за чатом поддержки для новых вопросов",
+        "unlock_condition": null,
+        "xp_cost": 0
+      }
+    ],
+    "rewards": {
+      "xp": 150,
+      "bonus_xp": 25,
+      "items": ["helper_badge"],
+      "achievement_id": null
+    },
+    "tags": ["помощь", "модерация", "сообщество", "еженедельные"],
+    "created_at": "2024-01-15T00:00:00",
+    "updated_at": null,
+    "created_by": "moderator",
+    "completion_count": 1,
+    "average_completion_time": 45.0,
+    "success_rate": 100.0,
+    "average_rating": 5.0,
+    "resources": [
+      "https://example.com/guide/helping-users"
+    ],
+    "examples": [
+      "Ответьте на вопросы в чате поддержки",
+      "Создайте полезный пост для новичков"
+    ],
+    "custom_data": {
+      "moderator_only": false,
+      "community_task": true
+    }
+  },
+  "task_006": {
+    "task_id": "task_006",
+    "title": "Еженедельный отчет",
+    "description": "Создайте детальный отчет о своей активности за неделю. Проанализируйте выполненные задачи и поставьте цели на следующую неделю.",
+    "category": "Модерация",
+    "difficulty": "hard",
+    "xp_reward": 300,
+    "is_active": true,
+    "is_featured": false,
+    "is_daily": false,
+    "is_weekly": true,
+    "time_limit": 120,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": ["task_005"],
+    "requirements": [
+      {
+        "requirement_id": "req_006_1",
+        "description": "Проанализировать активность за неделю",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      },
+      {
+        "requirement_id": "req_006_2",
+        "description": "Написать отчет не менее 200 слов",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      },
+      {
+        "requirement_id": "req_006_3",
+        "description": "Поставить цели на следующую неделю",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_006_1",
+        "content": "Используйте /stats для получения данных о своей активности",
+        "unlock_condition": null,
+        "xp_cost": 0
+      },
+      {
+        "hint_id": "hint_006_2",
+        "content": "Включите в отчет количество выполненных задач, заработанный XP и время активности",
+        "unlock_condition": "after_15_minutes",
+        "xp_cost": 15
+      }
+    ],
+    "rewards": {
+      "xp": 300,
+      "bonus_xp": 100,
+      "items": ["analyst_badge", "weekly_master"],
+      "achievement_id": null
+    },
+    "tags": ["отчеты", "анализ", "планирование", "еженедельные", "модерация"],
+    "created_at": "2024-02-01T00:00:00",
+    "updated_at": "2024-05-15T10:00:00",
+    "created_by": "admin",
+    "completion_count": 1,
+    "average_completion_time": 75.0,
+    "success_rate": 90.0,
+    "average_rating": 4.0,
+    "resources": [
+      "https://example.com/guide/weekly-reports",
+      "https://example.com/template/report-template"
+    ],
+    "examples": [
+      "На этой неделе я выполнил 5 задач и заработал 250 XP",
+      "Цель на следующую неделю: выполнить 7 задач и помочь 2 новичкам"
+    ],
+    "custom_data": {
+      "report_template": true,
+      "min_word_count": 200,
+      "review_required": true
+    }
+  },
+  "task_007": {
+    "task_id": "task_007",
+    "title": "Создание контента",
+    "description": "Создайте полезный контент для сообщества: написать гайд, записать видео или создать инфографику по использованию бота.",
+    "category": "Творчество",
+    "difficulty": "hard",
+    "xp_reward": 400,
+    "is_active": false,
+    "is_featured": true,
+    "is_daily": false,
+    "is_weekly": false,
+    "time_limit": 180,
+    "available_from": "2024-03-01T00:00:00",
+    "available_until": "2024-12-31T23:59:59",
+    "prerequisites": ["task_004"],
+    "requirements": [
+      {
+        "requirement_id": "req_007_1",
+        "description": "Создать оригинальный контент",
+        "is_mandatory": true,
+        "verification_type": "file_upload"
+      },
+      {
+        "requirement_id": "req_007_2",
+        "description": "Получить одобрение модератора",
+        "is_mandatory": true,
+        "verification_type": "manual"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_007_1",
+        "content": "Популярные темы: советы для новичков, секретные функции, лайфхаки",
+        "unlock_condition": null,
+        "xp_cost": 0
+      }
+    ],
+    "rewards": {
+      "xp": 400,
+      "bonus_xp": 200,
+      "items": ["creator_badge", "content_master"],
+      "achievement_id": "content_creator"
+    },
+    "tags": ["творчество", "контент", "сообщество", "креатив"],
+    "created_at": "2024-03-01T00:00:00",
+    "updated_at": null,
+    "created_by": "admin",
+    "completion_count": 0,
+    "average_completion_time": null,
+    "success_rate": null,
+    "average_rating": null,
+    "resources": [
+      "https://example.com/guide/content-creation",
+      "https://example.com/tools/design-tools"
+    ],
+    "examples": [
+      "Гайд 'Топ-10 секретов эффективного использования бота'",
+      "Видео-туториал для новичков",
+      "Инфографика с статистикой сообщества"
+    ],
+    "custom_data": {
+      "content_types": ["text", "video", "image", "infographic"],
+      "moderation_required": true,
+      "featured_content": true
+    }
+  },
+  "task_008": {
+    "task_id": "task_008",
+    "title": "Пригласи друга",
+    "description": "Пригласите друга присоединиться к боту используя вашу реферальную ссылку. Помогите ему выполнить первые задачи.",
+    "category": "Социальные",
+    "difficulty": "easy",
+    "xp_reward": 75,
+    "is_active": true,
+    "is_featured": false,
+    "is_daily": false,
+    "is_weekly": false,
+    "time_limit": null,
+    "available_from": null,
+    "available_until": null,
+    "prerequisites": ["task_001"],
+    "requirements": [
+      {
+        "requirement_id": "req_008_1",
+        "description": "Пригласить одного друга",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      },
+      {
+        "requirement_id": "req_008_2",
+        "description": "Друг должен выполнить первую задачу",
+        "is_mandatory": true,
+        "verification_type": "automatic"
+      }
+    ],
+    "hints": [
+      {
+        "hint_id": "hint_008_1",
+        "content": "Найдите свою реферальную ссылку в профиле",
+        "unlock_condition": null,
+        "xp_cost": 0
+      }
+    ],
+    "rewards": {
+      "xp": 75,
+      "bonus_xp": 25,
+      "items": ["recruiter_badge"],
+      "achievement_id": null
+    },
+    "tags": ["социальные", "реферралы", "друзья", "рост"],
+    "created_at": "2024-01-20T00:00:00",
+    "updated_at": null,
+    "created_by": "system",
+    "completion_count": 0,
+    "average_completion_time": null,
+    "success_rate": null,
+    "average_rating": null,
+    "resources": [
+      "https://example.com/guide/referral-program"
+    ],
+    "examples": [
+      "Поделитесь ссылкой в социальных сетях",
+      "Расскажите друзьям о полезных функциях бота"
+    ],
+    "custom_data": {
+      "referral_task": true,
+      "social_growth": true
+    }
+  }
+}
