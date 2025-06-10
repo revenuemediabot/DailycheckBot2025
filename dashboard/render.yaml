@@ -1,0 +1,58 @@
+services:
+  # Telegram Bot Service
+  - type: web
+    name: telegram-bot
+    env: python
+    plan: starter  # или другой план по вашим потребностям
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/start_bot.py --webhook
+    envVars:
+      - key: BOT_TOKEN
+        sync: false  # Установите в Render Dashboard
+      - key: WEBHOOK_URL
+        value: https://dashboard.render.com/web/srv-d126cb6mcj7s73f1q2k0  # Замените на ваш URL
+      - key: WEBHOOK_PORT
+        value: "8443"
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: TZ
+        value: UTC
+    autoDeploy: true
+    disk:
+      name: data-disk
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    healthCheckPath: /health
+    
+  # Web Dashboard Service
+  - type: web
+    name: dashboard
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: python scripts/start_web.py --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: TZ
+        value: UTC
+      - key: WEB_HOST
+        value: "0.0.0.0"
+    autoDeploy: true
+    disk:
+      name: dashboard-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    healthCheckPath: /health
+
+databases: []
+
+# Опциональные настройки для Redis (если потребуется кэширование)
+# - type: redis
+#   name: redis-cache
+#   plan: starter
+#   maxmemoryPolicy: allkeys-lru
