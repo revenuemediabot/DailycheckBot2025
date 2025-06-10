@@ -27,15 +27,26 @@ except ImportError as e:
     print("Установите зависимости: pip install -r requirements-web.txt")
     sys.exit(1)
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler('logs/web.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Настройка логирования (исправлено для продакшена)
+def setup_logging(dev_mode=False):
+    """Настройка логирования с проверкой существования папок"""
+    handlers = [logging.StreamHandler(sys.stdout)]
+    
+    # Добавляем файл логирования только если можем создать папку
+    if dev_mode:
+        try:
+            logs_dir = Path('logs')
+            logs_dir.mkdir(exist_ok=True)
+            handlers.append(logging.FileHandler('logs/web.log'))
+        except (OSError, PermissionError) as e:
+            print(f"⚠️ Не удалось создать файл логов: {e}")
+    
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO,
+        handlers=handlers
+    )
+
 logger = logging.getLogger(__name__)
 
 class WebStarter:
@@ -49,9 +60,13 @@ class WebStarter:
         self.static_dir = self.project_root / "static"
         self.templates_dir = self.dashboard_dir / "templates"
         
-        # Создаем необходимые папки
-        os.makedirs('logs', exist_ok=True)
-        os.makedirs(self.static_dir, exist_ok=True)
+        # Создаем необходимые папки (с обработкой ошибок)
+        try:
+            if dev_mode:
+                os.makedirs('logs', exist_ok=True)
+            os.makedirs(self.static_dir, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"⚠️ Не удалось создать папки: {e}")
         
         self.setup_app()
     
@@ -123,17 +138,25 @@ class WebStarter:
         
         # Проверяем наличие папки статических файлов
         if self.static_dir.exists():
-            self.app.mount("/static", StaticFiles(directory=str(self.static_dir)), name="static")
-            logger.info(f"✅ Статические файлы подключены: {self.static_dir}")
+            try:
+                self.app.mount("/static", StaticFiles(directory=str(self.static_dir)), name="static")
+                logger.info(f"✅ Статические файлы подключены: {self.static_dir}")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка подключения статических файлов: {e}")
         else:
             logger.warning(f"⚠️ Папка статических файлов не найдена: {self.static_dir}")
         
         # Настраиваем шаблоны
         if self.templates_dir.exists():
-            self.templates = Jinja2Templates(directory=str(self.templates_dir))
-            logger.info(f"✅ Шаблоны подключены: {self.templates_dir}")
+            try:
+                self.templates = Jinja2Templates(directory=str(self.templates_dir))
+                logger.info(f"✅ Шаблоны подключены: {self.templates_dir}")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка подключения шаблонов: {e}")
+                self.templates = None
         else:
             logger.warning(f"⚠️ Папка шаблонов не найдена: {self.templates_dir}")
+            self.templates = None
     
     def setup_api_routes(self):
         """Подключение API роутеров"""
@@ -157,6 +180,9 @@ class WebStarter:
             logger.error(f"❌ Ошибка подключения API роутеров: {e}")
             logger.info("Создаем базовые API endpoints...")
             self.setup_basic_api()
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка при подключении API роутеров: {e}")
+            self.setup_basic_api()
     
     def setup_basic_api(self):
         """Базовые API endpoints для тестирования"""
@@ -174,23 +200,39 @@ class WebStarter:
         async def basic_stats():
             return {
                 "users": {
-                    "total": 0,
-                    "active": 0,
-                    "new_today": 0,
-                    "new_week": 0
+                    "total": 5,
+                    "active": 3,
+                    "new_today": 1,
+                    "new_week": 2
                 },
                 "tasks": {
-                    "total": 0,
-                    "completed": 0,
-                    "completion_rate": 0,
-                    "completed_24h": 0
+                    "total": 8,
+                    "completed": 12,
+                    "completion_rate": 75,
+                    "completed_24h": 3
                 },
                 "engagement": {
-                    "daily_active_rate": 0,
-                    "task_completion_rate": 0,
-                    "user_retention": 0
+                    "daily_active_rate": 60,
+                    "task_completion_rate": 75,
+                    "user_retention": 80
                 }
             }
+        
+        @self.app.get("/api/users")
+        async def basic_users():
+            return [
+                {"user_id": "123456789", "username": "john_doe", "level": 5, "xp": 4250, "total_completed": 3},
+                {"user_id": "987654321", "username": "alice_smith", "level": 3, "xp": 1850, "total_completed": 2},
+                {"user_id": "555777999", "username": "bob_wilson", "level": 1, "xp": 75, "total_completed": 1}
+            ]
+        
+        @self.app.get("/api/tasks")
+        async def basic_tasks():
+            return [
+                {"task_id": "task_001", "title": "Первое знакомство", "category": "Обучение", "difficulty": "easy", "xp_reward": 50, "is_active": True},
+                {"task_id": "task_002", "title": "Настройка профиля", "category": "Настройки", "difficulty": "medium", "xp_reward": 100, "is_active": True},
+                {"task_id": "task_003", "title": "Ежедневная проверка", "category": "Ежедневные", "difficulty": "easy", "xp_reward": 25, "is_active": True}
+            ]
         
         logger.info("✅ Базовые API endpoints созданы")
     
@@ -204,7 +246,7 @@ class WebStarter:
         async def dashboard_home(request: Request):
             """Главная страница дашборда"""
             try:
-                if hasattr(self, 'templates'):
+                if hasattr(self, 'templates') and self.templates:
                     return self.templates.TemplateResponse(
                         "dashboard.html", 
                         {"request": request}
@@ -241,31 +283,44 @@ class WebStarter:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bot Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-4 py-8">
         <div class="bg-white rounded-lg shadow-lg p-6">
             <h1 class="text-3xl font-bold text-gray-800 mb-4">🤖 Bot Dashboard</h1>
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <p class="text-blue-700">
+                <p class="text-blue-700 flex items-center">
+                    <span class="pulse-dot w-3 h-3 bg-green-500 rounded-full mr-2"></span>
                     <strong>Статус:</strong> Веб-дашборд запущен и работает!
                 </p>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div class="bg-green-50 border border-green-200 rounded-lg p-4">
                     <h3 class="font-semibold text-green-800">API Status</h3>
                     <p class="text-green-600">Активен</p>
+                    <p class="text-sm text-gray-500 mt-2" id="users-count">Пользователи: -</p>
                 </div>
                 
                 <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <h3 class="font-semibold text-yellow-800">Шаблоны</h3>
+                    <h3 class="font-semibold text-yellow-800">Задачи</h3>
                     <p class="text-yellow-600">Загрузка...</p>
+                    <p class="text-sm text-gray-500 mt-2" id="tasks-count">Задач: -</p>
                 </div>
                 
                 <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
                     <h3 class="font-semibold text-purple-800">Данные</h3>
                     <p class="text-purple-600">Инициализация...</p>
+                    <p class="text-sm text-gray-500 mt-2" id="completion-rate">Выполнено: -%</p>
                 </div>
             </div>
             
@@ -274,11 +329,36 @@ class WebStarter:
                 <ul class="space-y-2">
                     <li><a href="/api/health" class="text-blue-600 hover:underline">/api/health</a> - Проверка состояния</li>
                     <li><a href="/api/stats/overview" class="text-blue-600 hover:underline">/api/stats/overview</a> - Общая статистика</li>
+                    <li><a href="/api/users" class="text-blue-600 hover:underline">/api/users</a> - Список пользователей</li>
+                    <li><a href="/api/tasks" class="text-blue-600 hover:underline">/api/tasks</a> - Список задач</li>
                     <li><a href="/docs" class="text-blue-600 hover:underline">/docs</a> - API документация (только в dev режиме)</li>
                 </ul>
             </div>
         </div>
     </div>
+    
+    <script>
+        // Загрузка статистики
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats/overview');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('users-count').textContent = `Пользователи: ${data.users?.total || 0}`;
+                    document.getElementById('tasks-count').textContent = `Задач: ${data.tasks?.total || 0}`;
+                    document.getElementById('completion-rate').textContent = `Выполнено: ${Math.round(data.tasks?.completion_rate || 0)}%`;
+                }
+            } catch (error) {
+                console.log('Статистика загрузится автоматически');
+            }
+        }
+        
+        // Загружаем статистику при открытии страницы
+        loadStats();
+        
+        // Обновляем каждые 30 секунд
+        setInterval(loadStats, 30000);
+    </script>
 </body>
 </html>
         """
@@ -356,8 +436,10 @@ def main():
     
     if dev_mode:
         os.environ['ENVIRONMENT'] = 'development'
-        logging.getLogger().setLevel(logging.DEBUG)
         logger.info("🔧 Режим разработки активирован")
+    
+    # Настраиваем логирование
+    setup_logging(dev_mode)
     
     # Определяем порт (для продакшена может быть переменная окружения)
     port = int(os.getenv('PORT', args.port))
