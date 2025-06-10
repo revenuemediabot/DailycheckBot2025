@@ -470,7 +470,7 @@ class UserSettings:
     motivational_messages: bool = True
     notification_sound: bool = True
     auto_archive_completed: bool = False
-    ai_chat_enabled: bool = True
+    ai_chat_enabled: bool = False  # По умолчанию выключен!
     show_xp: bool = True
     show_streaks: bool = True
     dry_mode_enabled: bool = False  # Режим "трезвости"
@@ -1228,6 +1228,11 @@ class AIService:
         self.client = None
         self.enabled = OPENAI_AVAILABLE and BotConfig.OPENAI_API_KEY
         
+        # Проверяем, что API ключ не равен BOT_TOKEN
+        if self.enabled and BotConfig.OPENAI_API_KEY == BotConfig.BOT_TOKEN:
+            logger.warning("⚠️ OPENAI_API_KEY совпадает с BOT_TOKEN - AI функции отключены")
+            self.enabled = False
+        
         if self.enabled:
             try:
                 from openai import AsyncOpenAI
@@ -1237,7 +1242,12 @@ class AIService:
                 logger.error(f"❌ Ошибка инициализации AI: {e}")
                 self.enabled = False
         else:
-            logger.warning("⚠️ AI сервис отключен (нет OpenAI API ключа)")
+            if not BotConfig.OPENAI_API_KEY:
+                logger.warning("⚠️ AI сервис отключен (нет OPENAI_API_KEY)")
+            elif BotConfig.OPENAI_API_KEY == BotConfig.BOT_TOKEN:
+                logger.warning("⚠️ AI сервис отключен (OPENAI_API_KEY = BOT_TOKEN)")
+            else:
+                logger.warning("⚠️ AI сервис отключен (OpenAI недоступен)")
     
     def classify_request(self, message: str, user: User) -> AIRequestType:
         """Классификация типа запроса пользователя"""
@@ -2310,16 +2320,16 @@ class DailyCheckBot:
         logger.debug("Регистрируем callback обработчики...")
         self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
         
-        # AI чат (ВАЖНО: проверяем что не в диалоге!)
+        # AI чат (ВАЖНО: в группе 2 - низкий приоритет!)
         logger.debug("Регистрируем AI чат обработчик...")
         self.application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
             self.handle_ai_chat_message
-        ))
+        ), group=2)
         
-        # Общий обработчик сообщений (последний)
+        # Общий обработчик сообщений (последний - группа 3)
         logger.debug("Регистрируем общий обработчик...")
-        self.application.add_handler(MessageHandler(filters.ALL, self.handle_unknown_message))
+        self.application.add_handler(MessageHandler(filters.ALL, self.handle_unknown_message), group=3)
         
         # Обработчик ошибок
         logger.debug("Регистрируем обработчик ошибок...")
@@ -2378,10 +2388,14 @@ class DailyCheckBot:
             ],
             name="task_creation",
             persistent=False,
-            allow_reentry=True
+            allow_reentry=True,
+            per_message=False,
+            per_chat=True,
+            per_user=True
         )
-        self.application.add_handler(task_creation_handler)
-        logger.info("✅ ConversationHandler для создания задач зарегистрирован")
+        # Регистрируем в группе 0 (высший приоритет)
+        self.application.add_handler(task_creation_handler, group=0)
+        logger.info("✅ ConversationHandler для создания задач зарегистрирован (группа 0)")
         
         # Добавление друга
         add_friend_handler = ConversationHandler(
@@ -2398,9 +2412,12 @@ class DailyCheckBot:
             },
             fallbacks=[CommandHandler("cancel", self.cancel_conversation)],
             name="add_friend",
-            persistent=False
+            persistent=False,
+            per_message=False,
+            per_chat=True,
+            per_user=True
         )
-        self.application.add_handler(add_friend_handler)
+        self.application.add_handler(add_friend_handler, group=0)
         
         # Создание напоминания
         reminder_handler = ConversationHandler(
@@ -2423,9 +2440,12 @@ class DailyCheckBot:
             },
             fallbacks=[CommandHandler("cancel", self.cancel_conversation)],
             name="reminder",
-            persistent=False
+            persistent=False,
+            per_message=False,
+            per_chat=True,
+            per_user=True
         )
-        self.application.add_handler(reminder_handler)
+        self.application.add_handler(reminder_handler, group=0)
     
     # ===== ОСНОВНЫЕ КОМАНДЫ =====
     
@@ -4099,17 +4119,29 @@ AI-чат позволяет общаться с ботом как с умным
         if not update.message or not update.message.text:
             return
         
-        # ВАЖНО: Проверяем, не находится ли пользователь в диалоге
+        # КРИТИЧНО: Проверяем, не находится ли пользователь в диалоге
+        user_id = update.effective_user.id
+        
+        # Проверяем активные ConversationHandler'ы
         if context.user_data:
-            # Если есть данные в контексте, значит идет диалог - пропускаем
-            logger.debug(f"Пропускаем AI-чат для пользователя {update.effective_user.id} - идет диалог")
+            logger.debug(f"AI-чат: Пропускаем для пользователя {user_id} - активный диалог. Context: {context.user_data.keys()}")
             return
         
-        user = self.db.get_or_create_user(update.effective_user.id)
+        # Дополнительная проверка через application handlers
+        for handler_group in self.application.handlers.values():
+            for handler in handler_group:
+                if isinstance(handler, ConversationHandler):
+                    # Проверяем, есть ли пользователь в состоянии диалога
+                    conversation_key = (user_id, user_id)  # (chat_id, user_id)
+                    if hasattr(handler, 'conversations') and conversation_key in handler.conversations:
+                        logger.debug(f"AI-чат: Пропускаем для пользователя {user_id} - активный ConversationHandler {handler.name}")
+                        return
+        
+        user = self.db.get_or_create_user(user_id)
         
         # Проверяем, включен ли AI чат
         if not user.settings.ai_chat_enabled:
-            logger.debug(f"AI-чат отключен для пользователя {update.effective_user.id}")
+            logger.debug(f"AI-чат отключен для пользователя {user_id}")
             return  # Пропускаем сообщение
         
         message_text = update.message.text
@@ -4122,11 +4154,15 @@ AI-чат позволяет общаться с ботом как с умным
         response = await self.ai_service.generate_response(message_text, user)
         
         # Отправляем ответ с кнопками AI функций
-        await update.message.reply_text(
-            response,
-            reply_markup=KeyboardManager.get_ai_keyboard(),
-            parse_mode='Markdown'
-        )
+        try:
+            await update.message.reply_text(
+                response,
+                reply_markup=KeyboardManager.get_ai_keyboard()
+            )
+        except Exception as e:
+            # Fallback без Markdown если есть проблемы с форматированием
+            await update.message.reply_text(response)
+            logger.warning(f"Проблема с Markdown в AI ответе: {e}")
         
         # Сохраняем пользователя
         self.db.save_user(user)
