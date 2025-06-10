@@ -23,13 +23,18 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
 # Попытка импорта Redis
 try:
     import redis.asyncio as redis
     REDIS_AVAILABLE = True
+    RedisType = redis.Redis
 except ImportError:
     REDIS_AVAILABLE = False
-    logger = logging.getLogger(__name__)
+    RedisType = type(None)  # Используем type(None) вместо None для типизации
+    redis = None
     logger.warning("⚠️ Redis не доступен, используем in-memory кэш")
 
 # Попытка импорта SQLAlchemy
@@ -39,7 +44,7 @@ try:
     SQLALCHEMY_AVAILABLE = True
 except ImportError:
     SQLALCHEMY_AVAILABLE = False
-    logger = logging.getLogger(__name__)
+    AsyncSession = type(None)  # Используем type(None) для типизации
     logger.warning("⚠️ SQLAlchemy не доступен, база данных отключена")
 
 from fastapi import Depends, HTTPException, Request, status, BackgroundTasks
@@ -124,7 +129,7 @@ logger = logging.getLogger(__name__)
 _data_manager: Optional[DataManager] = None
 _statistics_calculator: Optional[StatisticsCalculator] = None
 _analytics_engine: Optional[AnalyticsEngine] = None
-_redis_client: Optional[redis.Redis] = None
+_redis_client: Optional[RedisType] = None
 _db_engine = None
 _db_session_factory = None
 
@@ -208,7 +213,7 @@ async def init_analytics_engine() -> AnalyticsEngine:
     
     return _analytics_engine
 
-async def init_redis() -> Optional[redis.Redis]:
+async def init_redis() -> Optional[RedisType]:
     """Инициализация Redis для кэширования"""
     global _redis_client
     
@@ -302,7 +307,7 @@ async def get_analytics_engine() -> AnalyticsEngine:
         )
     return _analytics_engine
 
-async def get_redis() -> Optional[redis.Redis]:
+async def get_redis() -> Optional[RedisType]:
     """Получить Redis клиент"""
     await ensure_initialized()
     return _redis_client
@@ -377,7 +382,7 @@ class InMemoryCache:
 class CacheManager:
     """Менеджер кэширования данных"""
     
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: Optional[RedisType] = None):
         self.redis = redis_client
         self.memory_cache = InMemoryCache(settings.CACHE_TTL)
         self.cache_ttl = settings.CACHE_TTL
@@ -653,7 +658,7 @@ async def require_admin(
 class RateLimiter:
     """Rate limiter с поддержкой Redis и памяти"""
     
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: Optional[RedisType] = None):
         self.redis = redis_client
         self.memory_store: Dict[str, List[float]] = {}
         self.limits = self._parse_limit(settings.API_RATE_LIMIT)
@@ -1098,11 +1103,11 @@ async def cleanup_resources():
             await _cache_manager.clear()
         
         # Закрываем Redis
-        if _redis_client:
+        if _redis_client and REDIS_AVAILABLE:
             await _redis_client.close()
         
         # Закрываем БД
-        if _db_engine:
+        if _db_engine and SQLALCHEMY_AVAILABLE:
             await _db_engine.dispose()
         
         logger.info("✅ Ресурсы очищены")
