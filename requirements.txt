@@ -17,4 +17,4 @@ psycopg2-binary>=2.9.0
 databases[postgresql,sqlite]>=0.8.0
 fastapi>=0.104.1
 uvicorn>=0.24.0
-aiohttp>=3.9.1
+
