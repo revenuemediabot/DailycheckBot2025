@@ -108,8 +108,8 @@ class BotConfig:
     # Производительность
     MAX_USERS_CACHE = int(os.getenv('MAX_USERS_CACHE', 1000))
     BACKUP_INTERVAL_HOURS = int(os.getenv('BACKUP_INTERVAL_HOURS', 6))
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
-    DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG').upper()  # Временно включаем DEBUG
+    DEBUG_MODE = os.getenv('DEBUG_MODE', 'true').lower() == 'true'  # Временно включаем DEBUG
     
     # Создаем директории
     @classmethod
@@ -132,7 +132,12 @@ def setup_logging():
     
     # Основной логгер
     logger = logging.getLogger('dailycheck')
-    logger.setLevel(getattr(logging, BotConfig.LOG_LEVEL))
+    
+    # Устанавливаем уровень логирования
+    if BotConfig.DEBUG_MODE:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(getattr(logging, BotConfig.LOG_LEVEL))
     
     # Консольный обработчик
     console_handler = logging.StreamHandler(sys.stdout)
@@ -2249,6 +2254,7 @@ class DailyCheckBot:
         logger.info("📋 Регистрация обработчиков команд...")
         
         # Основные команды
+        logger.debug("Регистрируем основные команды...")
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("tasks", self.tasks_command))
@@ -2260,6 +2266,7 @@ class DailyCheckBot:
         self.application.add_handler(CommandHandler("settings", self.settings_command))
         
         # AI команды
+        logger.debug("Регистрируем AI команды...")
         self.application.add_handler(CommandHandler("ai_chat", self.ai_chat_command))
         self.application.add_handler(CommandHandler("motivate", self.ai_motivate_command))
         self.application.add_handler(CommandHandler("ai_coach", self.ai_coach_command))
@@ -2267,6 +2274,7 @@ class DailyCheckBot:
         self.application.add_handler(CommandHandler("suggest_tasks", self.ai_suggest_tasks_command))
         
         # Утилиты
+        logger.debug("Регистрируем утилиты...")
         self.application.add_handler(CommandHandler("timer", self.timer_command))
         self.application.add_handler(CommandHandler("remind", self.remind_command))
         self.application.add_handler(CommandHandler("theme", self.theme_command))
@@ -2276,11 +2284,13 @@ class DailyCheckBot:
         self.application.add_handler(CommandHandler("add_friend", self.add_friend_command))
         
         # Быстрые команды
+        logger.debug("Регистрируем быстрые команды...")
         self.application.add_handler(CommandHandler("settasks", self.settasks_command))
         self.application.add_handler(CommandHandler("weekly_goals", self.weekly_goals_command))
         self.application.add_handler(CommandHandler("analytics", self.analytics_command))
         
         # Обработчики кнопок главного меню
+        logger.debug("Регистрируем обработчики кнопок...")
         self.application.add_handler(MessageHandler(filters.Regex("^📝 Мои задачи$"), self.tasks_command))
         self.application.add_handler(MessageHandler(filters.Regex("^➕ Добавить задачу$"), self.add_task_start))
         self.application.add_handler(MessageHandler(filters.Regex("^✅ Отметить выполнение$"), self.completion_button_handler))
@@ -2292,22 +2302,27 @@ class DailyCheckBot:
         self.application.add_handler(MessageHandler(filters.Regex("^⚙️ Настройки$"), self.settings_command))
         self.application.add_handler(MessageHandler(filters.Regex("^ℹ️ Справка$"), self.help_command))
         
-        # Создание задач через ConversationHandler
+        # Создание задач через ConversationHandler (ВАЖНО: до AI чата!)
+        logger.debug("Регистрируем ConversationHandler'ы...")
         self._register_task_creation_handlers()
         
         # Callback обработчики
+        logger.debug("Регистрируем callback обработчики...")
         self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
         
-        # AI чат (должен быть перед общим обработчиком сообщений)
+        # AI чат (ВАЖНО: проверяем что не в диалоге!)
+        logger.debug("Регистрируем AI чат обработчик...")
         self.application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
             self.handle_ai_chat_message
         ))
         
         # Общий обработчик сообщений (последний)
+        logger.debug("Регистрируем общий обработчик...")
         self.application.add_handler(MessageHandler(filters.ALL, self.handle_unknown_message))
         
         # Обработчик ошибок
+        logger.debug("Регистрируем обработчик ошибок...")
         self.application.add_error_handler(self.error_handler)
         
         total_handlers = sum(len(handlers) for handlers in self.application.handlers.values())
@@ -2326,19 +2341,47 @@ class DailyCheckBot:
                 CommandHandler("add", self.add_task_start)
             ],
             states={
-                self.TASK_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_task_title)],
-                self.TASK_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_task_description)],
-                self.TASK_CATEGORY: [CallbackQueryHandler(self.add_task_category, pattern="^category_")],
-                self.TASK_PRIORITY: [CallbackQueryHandler(self.add_task_priority, pattern="^priority_")],
-                self.TASK_DIFFICULTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_task_difficulty)],
-                self.TASK_TAGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_task_tags)]
+                self.TASK_TITLE: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.add_task_title
+                    )
+                ],
+                self.TASK_DESCRIPTION: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.add_task_description
+                    )
+                ],
+                self.TASK_CATEGORY: [
+                    CallbackQueryHandler(self.add_task_category, pattern="^category_")
+                ],
+                self.TASK_PRIORITY: [
+                    CallbackQueryHandler(self.add_task_priority, pattern="^priority_")
+                ],
+                self.TASK_DIFFICULTY: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.add_task_difficulty
+                    )
+                ],
+                self.TASK_TAGS: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.add_task_tags
+                    )
+                ]
             },
             fallbacks=[
                 CommandHandler("cancel", self.cancel_conversation),
                 MessageHandler(filters.Regex("^❌ Отмена$"), self.cancel_conversation)
-            ]
+            ],
+            name="task_creation",
+            persistent=False,
+            allow_reentry=True
         )
         self.application.add_handler(task_creation_handler)
+        logger.info("✅ ConversationHandler для создания задач зарегистрирован")
         
         # Добавление друга
         add_friend_handler = ConversationHandler(
@@ -2346,9 +2389,16 @@ class DailyCheckBot:
                 MessageHandler(filters.Regex("👥 Добавление друга"), self.add_friend_start)
             ],
             states={
-                self.FRIEND_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_friend_id)]
+                self.FRIEND_ID: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.add_friend_id
+                    )
+                ]
             },
-            fallbacks=[CommandHandler("cancel", self.cancel_conversation)]
+            fallbacks=[CommandHandler("cancel", self.cancel_conversation)],
+            name="add_friend",
+            persistent=False
         )
         self.application.add_handler(add_friend_handler)
         
@@ -2358,10 +2408,22 @@ class DailyCheckBot:
                 MessageHandler(filters.Regex("🔔 Создание напоминания"), self.remind_message_start)
             ],
             states={
-                self.REMINDER_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.remind_message)],
-                self.REMINDER_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.remind_time)]
+                self.REMINDER_MESSAGE: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.remind_message
+                    )
+                ],
+                self.REMINDER_TIME: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, 
+                        self.remind_time
+                    )
+                ]
             },
-            fallbacks=[CommandHandler("cancel", self.cancel_conversation)]
+            fallbacks=[CommandHandler("cancel", self.cancel_conversation)],
+            name="reminder",
+            persistent=False
         )
         self.application.add_handler(reminder_handler)
     
@@ -3131,6 +3193,8 @@ class DailyCheckBot:
     
     async def add_task_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Начало создания задачи"""
+        logger.info(f"Пользователь {update.effective_user.id} начал создание задачи")
+        
         await update.message.reply_text(
             "📝 **Создание новой задачи**\n\nВведите название задачи (максимум 100 символов):",
             reply_markup=ReplyKeyboardRemove(),
@@ -3142,15 +3206,19 @@ class DailyCheckBot:
         """Получение названия задачи"""
         title = update.message.text.strip()
         
+        logger.info(f"Пользователь {update.effective_user.id} ввел название задачи: {title}")
+        
         if len(title) > 100:
             await update.message.reply_text(
-                "❌ **Название слишком длинное!**\n\nМаксимум 100 символов.\nПопробуйте еще раз:"
+                "❌ **Название слишком длинное!**\n\nМаксимум 100 символов.\nПопробуйте еще раз:",
+                parse_mode='Markdown'
             )
             return self.TASK_TITLE
         
         if len(title) < 3:
             await update.message.reply_text(
-                "❌ **Название слишком короткое!**\n\nМинимум 3 символа.\nПопробуйте еще раз:"
+                "❌ **Название слишком короткое!**\n\nМинимум 3 символа.\nПопробуйте еще раз:",
+                parse_mode='Markdown'
             )
             return self.TASK_TITLE
         
@@ -3166,11 +3234,14 @@ class DailyCheckBot:
         """Получение описания задачи"""
         description = update.message.text.strip()
         
+        logger.info(f"Пользователь {update.effective_user.id} ввел описание: {description[:50]}...")
+        
         if description.lower() in ['пропустить', 'skip', '-', 'нет']:
             description = None
         elif len(description) > 500:
             await update.message.reply_text(
-                "❌ **Описание слишком длинное!**\n\nМаксимум 500 символов.\nПопробуйте еще раз (или 'пропустить'):"
+                "❌ **Описание слишком длинное!**\n\nМаксимум 500 символов.\nПопробуйте еще раз (или 'пропустить'):",
+                parse_mode='Markdown'
             )
             return self.TASK_DESCRIPTION
         
@@ -3420,7 +3491,9 @@ class DailyCheckBot:
     
     async def cancel_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Отмена диалога"""
+        logger.info(f"Пользователь {update.effective_user.id} отменил диалог")
         context.user_data.clear()
+        
         await update.message.reply_text(
             "❌ **Операция отменена.**",
             reply_markup=KeyboardManager.get_main_keyboard()
@@ -4026,13 +4099,21 @@ AI-чат позволяет общаться с ботом как с умным
         if not update.message or not update.message.text:
             return
         
+        # ВАЖНО: Проверяем, не находится ли пользователь в диалоге
+        if context.user_data:
+            # Если есть данные в контексте, значит идет диалог - пропускаем
+            logger.debug(f"Пропускаем AI-чат для пользователя {update.effective_user.id} - идет диалог")
+            return
+        
         user = self.db.get_or_create_user(update.effective_user.id)
         
         # Проверяем, включен ли AI чат
         if not user.settings.ai_chat_enabled:
+            logger.debug(f"AI-чат отключен для пользователя {update.effective_user.id}")
             return  # Пропускаем сообщение
         
         message_text = update.message.text
+        logger.info(f"AI-чат сообщение от {user.user_id}: {message_text[:50]}...")
         
         # Показываем что бот печатает
         await update.message.chat.send_action('typing')
@@ -4276,6 +4357,11 @@ AI-чат позволяет общаться с ботом как с умным
     async def handle_unknown_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик неизвестных сообщений"""
         if update.message and update.message.text:
+            # ВАЖНО: Если идет диалог ConversationHandler - не обрабатываем
+            if context.user_data:
+                logger.debug(f"Пропускаем неизвестное сообщение для пользователя {update.effective_user.id} - идет диалог")
+                return
+            
             user = self.db.get_or_create_user(update.effective_user.id)
             message_text = update.message.text
             
