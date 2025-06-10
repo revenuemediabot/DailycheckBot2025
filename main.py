@@ -2022,7 +2022,6 @@ class DailyCheckBot:
             await self.application.updater.start_polling(
                 drop_pending_updates=True,
                 allowed_updates=['message', 'callback_query', 'inline_query'],
-                error_callback=self._error_handler
             )
             
             logger.info("✅ Polling запущен успешно")
