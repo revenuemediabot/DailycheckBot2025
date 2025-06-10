@@ -1,0 +1,360 @@
+{
+  "123456789": {
+    "user_id": "123456789",
+    "telegram_id": 123456789,
+    "username": "john_doe",
+    "first_name": "Джон",
+    "last_name": "Доу",
+    "level": 5,
+    "xp": 4250,
+    "role": "user",
+    "is_active": true,
+    "is_premium": false,
+    "join_date": "2024-01-15T10:30:00",
+    "last_activity": "2025-06-10T08:45:00",
+    "last_seen": "2025-06-10T08:45:00",
+    "completed_tasks": [
+      {
+        "task_id": "task_001",
+        "title": "Первое знакомство",
+        "category": "Обучение",
+        "difficulty": "easy",
+        "xp_reward": 50,
+        "completed_at": "2024-01-15T11:00:00",
+        "completion_time": 300,
+        "rating": 5
+      },
+      {
+        "task_id": "task_002", 
+        "title": "Настройка профиля",
+        "category": "Настройки",
+        "difficulty": "medium",
+        "xp_reward": 100,
+        "completed_at": "2024-01-16T14:30:00",
+        "completion_time": 600,
+        "rating": 4
+      },
+      {
+        "task_id": "task_003",
+        "title": "Ежедневная проверка",
+        "category": "Ежедневные",
+        "difficulty": "easy",
+        "xp_reward": 25,
+        "completed_at": "2025-06-10T08:00:00",
+        "completion_time": 120,
+        "rating": 5
+      }
+    ],
+    "achievements": [
+      {
+        "achievement_id": "first_task",
+        "title": "Первые шаги",
+        "description": "Выполнена первая задача",
+        "icon": "🎯",
+        "earned_at": "2024-01-15T11:00:00",
+        "xp_bonus": 25
+      },
+      {
+        "achievement_id": "week_warrior",
+        "title": "Недельный воин",
+        "description": "7 дней активности подряд",
+        "icon": "🔥",
+        "earned_at": "2024-01-22T10:00:00",
+        "xp_bonus": 100
+      }
+    ],
+    "streak": {
+      "current_streak": 7,
+      "longest_streak": 15,
+      "last_activity_date": "2025-06-10",
+      "streak_frozen": false
+    },
+    "daily_tasks_completed": 3,
+    "weekly_tasks_completed": 12,
+    "monthly_tasks_completed": 45,
+    "preferences": {
+      "language": "ru",
+      "notifications": true,
+      "daily_reminders": true,
+      "reminder_time": "09:00",
+      "timezone": "Europe/Moscow",
+      "theme": "light",
+      "weekly_report": true
+    },
+    "stats": {
+      "total_xp": 4250,
+      "current_level": 5,
+      "tasks_completed": 3,
+      "days_active": 25,
+      "avg_tasks_per_day": 2.1,
+      "favorite_category": "Ежедневные",
+      "total_time_spent": 3600
+    },
+    "referral_code": "JOHN2024",
+    "referred_by": null,
+    "custom_data": {}
+  },
+  "987654321": {
+    "user_id": "987654321",
+    "telegram_id": 987654321,
+    "username": "alice_smith",
+    "first_name": "Алиса",
+    "last_name": "Смит",
+    "level": 3,
+    "xp": 1850,
+    "role": "user",
+    "is_active": true,
+    "is_premium": true,
+    "join_date": "2024-02-01T15:20:00",
+    "last_activity": "2025-06-09T20:15:00",
+    "last_seen": "2025-06-09T20:15:00",
+    "completed_tasks": [
+      {
+        "task_id": "task_001",
+        "title": "Первое знакомство",
+        "category": "Обучение",
+        "difficulty": "easy",
+        "xp_reward": 50,
+        "completed_at": "2024-02-01T16:00:00",
+        "completion_time": 180,
+        "rating": 5
+      },
+      {
+        "task_id": "task_004",
+        "title": "Изучение функций",
+        "category": "Обучение",
+        "difficulty": "hard",
+        "xp_reward": 200,
+        "completed_at": "2024-02-03T12:30:00",
+        "completion_time": 1200,
+        "rating": 3
+      }
+    ],
+    "achievements": [
+      {
+        "achievement_id": "first_task",
+        "title": "Первые шаги",
+        "description": "Выполнена первая задача",
+        "icon": "🎯",
+        "earned_at": "2024-02-01T16:00:00",
+        "xp_bonus": 25
+      }
+    ],
+    "streak": {
+      "current_streak": 3,
+      "longest_streak": 12,
+      "last_activity_date": "2025-06-09",
+      "streak_frozen": false
+    },
+    "daily_tasks_completed": 1,
+    "weekly_tasks_completed": 5,
+    "monthly_tasks_completed": 18,
+    "preferences": {
+      "language": "ru",
+      "notifications": true,
+      "daily_reminders": false,
+      "reminder_time": "18:00",
+      "timezone": "Europe/London",
+      "theme": "dark",
+      "weekly_report": true
+    },
+    "stats": {
+      "total_xp": 1850,
+      "current_level": 3,
+      "tasks_completed": 2,
+      "days_active": 15,
+      "avg_tasks_per_day": 1.5,
+      "favorite_category": "Обучение",
+      "total_time_spent": 1800
+    },
+    "referral_code": "ALICE2024",
+    "referred_by": "JOHN2024",
+    "custom_data": {
+      "premium_since": "2024-02-15T00:00:00"
+    }
+  },
+  "555777999": {
+    "user_id": "555777999",
+    "telegram_id": 555777999,
+    "username": "bob_wilson",
+    "first_name": "Боб",
+    "last_name": "Вилсон",
+    "level": 1,
+    "xp": 75,
+    "role": "user",
+    "is_active": true,
+    "is_premium": false,
+    "join_date": "2025-06-08T12:00:00",
+    "last_activity": "2025-06-08T13:30:00",
+    "last_seen": "2025-06-08T13:30:00",
+    "completed_tasks": [
+      {
+        "task_id": "task_001",
+        "title": "Первое знакомство",
+        "category": "Обучение",
+        "difficulty": "easy",
+        "xp_reward": 50,
+        "completed_at": "2025-06-08T12:30:00",
+        "completion_time": 240,
+        "rating": 4
+      }
+    ],
+    "achievements": [
+      {
+        "achievement_id": "first_task",
+        "title": "Первые шаги",
+        "description": "Выполнена первая задача",
+        "icon": "🎯",
+        "earned_at": "2025-06-08T12:30:00",
+        "xp_bonus": 25
+      }
+    ],
+    "streak": {
+      "current_streak": 1,
+      "longest_streak": 1,
+      "last_activity_date": "2025-06-08",
+      "streak_frozen": false
+    },
+    "daily_tasks_completed": 1,
+    "weekly_tasks_completed": 1,
+    "monthly_tasks_completed": 1,
+    "preferences": {
+      "language": "ru",
+      "notifications": true,
+      "daily_reminders": true,
+      "reminder_time": "09:00",
+      "timezone": "UTC",
+      "theme": "light",
+      "weekly_report": false
+    },
+    "stats": {
+      "total_xp": 75,
+      "current_level": 1,
+      "tasks_completed": 1,
+      "days_active": 1,
+      "avg_tasks_per_day": 1.0,
+      "favorite_category": "Обучение",
+      "total_time_spent": 240
+    },
+    "referral_code": "BOB2025",
+    "referred_by": null,
+    "custom_data": {}
+  },
+  "111222333": {
+    "user_id": "111222333",
+    "telegram_id": 111222333,
+    "username": null,
+    "first_name": "Мария",
+    "last_name": null,
+    "level": 8,
+    "xp": 7500,
+    "role": "moderator",
+    "is_active": true,
+    "is_premium": true,
+    "join_date": "2023-12-01T09:00:00",
+    "last_activity": "2025-06-10T07:00:00",
+    "last_seen": "2025-06-10T07:00:00",
+    "completed_tasks": [
+      {
+        "task_id": "task_001",
+        "title": "Первое знакомство",
+        "category": "Обучение",
+        "difficulty": "easy",
+        "xp_reward": 50,
+        "completed_at": "2023-12-01T10:00:00",
+        "completion_time": 150,
+        "rating": 5
+      },
+      {
+        "task_id": "task_002",
+        "title": "Настройка профиля",
+        "category": "Настройки",
+        "difficulty": "medium",
+        "xp_reward": 100,
+        "completed_at": "2023-12-01T11:00:00",
+        "completion_time": 300,
+        "rating": 5
+      },
+      {
+        "task_id": "task_005",
+        "title": "Помощь новичкам",
+        "category": "Модерация",
+        "difficulty": "medium",
+        "xp_reward": 150,
+        "completed_at": "2024-01-10T14:00:00",
+        "completion_time": 900,
+        "rating": 5
+      },
+      {
+        "task_id": "task_006",
+        "title": "Еженедельный отчет",
+        "category": "Модерация",
+        "difficulty": "hard",
+        "xp_reward": 300,
+        "completed_at": "2025-06-10T07:00:00",
+        "completion_time": 1800,
+        "rating": 4
+      }
+    ],
+    "achievements": [
+      {
+        "achievement_id": "first_task",
+        "title": "Первые шаги",
+        "description": "Выполнена первая задача",
+        "icon": "🎯",
+        "earned_at": "2023-12-01T10:00:00",
+        "xp_bonus": 25
+      },
+      {
+        "achievement_id": "task_master",
+        "title": "Мастер задач",
+        "description": "Выполнено 10 задач",
+        "icon": "🏆",
+        "earned_at": "2024-01-15T12:00:00",
+        "xp_bonus": 200
+      },
+      {
+        "achievement_id": "month_master",
+        "title": "Месячный мастер",
+        "description": "30 дней активности подряд",
+        "icon": "📅",
+        "earned_at": "2024-01-01T00:00:00",
+        "xp_bonus": 500
+      }
+    ],
+    "streak": {
+      "current_streak": 45,
+      "longest_streak": 67,
+      "last_activity_date": "2025-06-10",
+      "streak_frozen": false
+    },
+    "daily_tasks_completed": 2,
+    "weekly_tasks_completed": 8,
+    "monthly_tasks_completed": 25,
+    "preferences": {
+      "language": "ru",
+      "notifications": true,
+      "daily_reminders": true,
+      "reminder_time": "07:00",
+      "timezone": "Europe/Moscow",
+      "theme": "dark",
+      "weekly_report": true
+    },
+    "stats": {
+      "total_xp": 7500,
+      "current_level": 8,
+      "tasks_completed": 4,
+      "days_active": 120,
+      "avg_tasks_per_day": 3.2,
+      "favorite_category": "Модерация",
+      "total_time_spent": 14400
+    },
+    "referral_code": "MARIA2023",
+    "referred_by": null,
+    "custom_data": {
+      "moderator_since": "2024-01-01T00:00:00",
+      "reports_created": 45,
+      "users_helped": 123
+    }
+  }
+}
