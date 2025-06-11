@@ -26,33 +26,54 @@ services:
       sizeGB: 1
     healthCheckPath: /health
     
-  # Web Dashboard Service
+  # Render.com конфигурация для DailyCheck Bot Dashboard v4.0.1
+services:
   - type: web
-    name: dashboard
+    name: dailycheck-dashboard-v4
     env: python
-    plan: starter
-    buildCommand: pip install -r requirements-web.txt
-    startCommand: python scripts/start_web.py --port $PORT
+    plan: free
+    
+    # Build команды
+    buildCommand: |
+      echo "🚀 Устанавливаем зависимости для DailyCheck Bot Dashboard v4.0.1..."
+      pip install --upgrade pip
+      pip install -r requirements-web.txt || pip install fastapi uvicorn python-dotenv
+      echo "✅ Зависимости установлены"
+    
+    # КРИТИЧНО: Используем ИСПРАВЛЕННУЮ версию с красивой HTML
+    startCommand: python scripts/start_web_fixed.py
+    
+    # Переменные окружения
     envVars:
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
       - key: ENVIRONMENT
         value: production
-      - key: PYTHONPATH
-        value: /opt/render/project/src
-      - key: TZ
-        value: UTC
-      - key: WEB_HOST
-        value: "0.0.0.0"
-    autoDeploy: true
-    disk:
-      name: dashboard-data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
+      - key: DEBUG
+        value: false
+    
+    # Health check настройки
     healthCheckPath: /health
-
-databases: []
-
-# Опциональные настройки для Redis (если потребуется кэширование)
-# - type: redis
-#   name: redis-cache
-#   plan: starter
-#   maxmemoryPolicy: allkeys-lru
+    
+    # Автоматический деплой при изменениях
+    autoDeploy: true
+    
+    # Настройки ресурсов
+    disk:
+      name: data
+      size: 1GB
+      mountPath: /app/data
+    
+    # Дополнительные настройки
+    buildFilter:
+      paths:
+        - scripts/start_web_fixed.py
+        - requirements-web.txt
+        - render.yaml
+      ignoredPaths:
+        - main.py
+        - scripts/start_web.py  # Игнорируем старую версию
+        - "*.md"
+        - "*.log"
