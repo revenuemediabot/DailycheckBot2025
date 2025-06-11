@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Скрипт запуска веб-дашборда DailyCheck Bot v4.0.1 - ИСПРАВЛЕННАЯ ВЕРСИЯ
+Скрипт запуска веб-дашборда DailyCheck Bot v4.0.1 - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 Использование: python scripts/start_web.py [--port PORT] [--dev] [--host HOST]
 
 ИСПРАВЛЕНИЯ v4.0.1:
 ✅ Красивая HTML главная страница вместо JSON
+✅ HTML версии для ВСЕХ основных endpoints (/health, /stats, /ping-test)
 ✅ Modern FastAPI lifespan events (убраны deprecated warnings)
 ✅ HEAD методы для мониторинга (200 OK)
 ✅ Стабильная работа без перезапусков
@@ -718,6 +719,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌍 Режим отладки: {'включен' if settings.DEBUG else 'отключен'}")
     logger.info("✅ ВСЕ ИСПРАВЛЕНИЯ v4.0.1 ПРИМЕНЕНЫ!")
     logger.info("   ✓ Красивая HTML главная страница")
+    logger.info("   ✓ HTML версии для всех основных endpoints")
     logger.info("   ✓ Modern lifespan events (без deprecated warnings)")
     logger.info("   ✓ HEAD методы возвращают 200 OK")
     logger.info("   ✓ Стабильная работа")
@@ -776,8 +778,195 @@ def create_app() -> FastAPI:
 app = create_app()
 
 # ============================================================================
-# ✅ HTML ШАБЛОН ДЛЯ КРАСИВОЙ ГЛАВНОЙ СТРАНИЦЫ - ОСНОВНОЕ ИСПРАВЛЕНИЕ v4.0.1
+# ✅ HTML ШАБЛОНЫ ДЛЯ КРАСИВЫХ СТРАНИЦ
 # ============================================================================
+
+def get_base_html_template(title: str, content: str, back_url: str = "/") -> str:
+    """✅ Базовый HTML шаблон для всех страниц"""
+    return f"""
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title} - DailyCheck Bot Dashboard v4.0.1</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+            display: flex;
+            flex-direction: column;
+        }}
+        
+        .header {{
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            padding: 20px 0;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }}
+        
+        .header h1 {{
+            font-size: 2em;
+            margin-bottom: 10px;
+        }}
+        
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 30px 20px;
+            flex: 1;
+        }}
+        
+        .back-button {{
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }}
+        
+        .back-button:hover {{
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }}
+        
+        .content-card {{
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }}
+        
+        .content-card h2 {{
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            color: #fff;
+        }}
+        
+        .data-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }}
+        
+        .data-item {{
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }}
+        
+        .data-item strong {{
+            color: #4CAF50;
+        }}
+        
+        .json-data {{
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+            margin: 20px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }}
+        
+        .status-badge {{
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin: 5px 5px 5px 0;
+        }}
+        
+        .nav-links {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }}
+        
+        .nav-link {{
+            display: block;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            text-decoration: none;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }}
+        
+        .nav-link:hover {{
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-3px);
+        }}
+        
+        .footer {{
+            background: rgba(0, 0, 0, 0.3);
+            text-align: center;
+            padding: 20px;
+            margin-top: auto;
+        }}
+        
+        @media (max-width: 768px) {{
+            .container {{
+                padding: 20px 10px;
+            }}
+            
+            .data-grid {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 DailyCheck Bot Dashboard v4.0.1</h1>
+    </div>
+    
+    <div class="container">
+        <a href="{back_url}" class="back-button">← Назад на главную</a>
+        
+        {content}
+    </div>
+    
+    <div class="footer">
+        <p>🎯 DailyCheck Bot Dashboard v4.0.1 - Все исправления применены</p>
+    </div>
+    
+    <script>
+        // Автообновление времени
+        function updateTime() {{
+            const timeElements = document.querySelectorAll('.current-time');
+            const now = new Date().toLocaleString('ru-RU');
+            timeElements.forEach(el => el.textContent = now);
+        }}
+        
+        updateTime();
+        setInterval(updateTime, 1000);
+    </script>
+</body>
+</html>
+    """
 
 def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
     """
@@ -1062,30 +1251,16 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
                 padding: 25px;
             }}
         }}
-        
-        .loading-animation {{
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-        }}
-        
-        @keyframes spin {{
-            to {{ transform: rotate(360deg); }}
-        }}
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🤖 DailyCheck Bot Dashboard</h1>
-        <div class="version-badge">v4.0.1 FIXED & STABLE</div>
+        <div class="version-badge">v4.0.1 ПОЛНОСТЬЮ ИСПРАВЛЕНО</div>
     </div>
     
     <div class="success-banner">
-        🎉 ВСЕ ПРОБЛЕМЫ РЕШЕНЫ! HTML страница работает идеально!
+        🎉 ВСЕ ПРОБЛЕМЫ РЕШЕНЫ! HTML страницы работают идеально для всех endpoints!
     </div>
     
     <div class="container">
@@ -1129,13 +1304,13 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
         
         <div class="nav-links">
             <a href="/health" class="nav-link">📋 Health Check</a>
-            <a href="/ping" class="nav-link">⚡ Ping Test</a>
-            <a href="/api/stats/overview" class="nav-link">📊 API Statistics</a>
+            <a href="/ping-test" class="nav-link">⚡ Ping Test</a>
+            <a href="/stats" class="nav-link">📊 Statistics</a>
             <a href="/api/leaderboard" class="nav-link">🏆 Leaderboard</a>
             <a href="/api/categories" class="nav-link">📁 Categories</a>
             <a href="/api/achievements" class="nav-link">🎯 Achievements</a>
             <a href="https://t.me/YourBotName" class="nav-link" target="_blank">🤖 Telegram Bot</a>
-            {'/docs' if settings.DEBUG else ''}
+            {f'<a href="/docs" class="nav-link">📚 API Docs</a>' if settings.DEBUG else ''}
         </div>
         
         <div class="info-section">
@@ -1165,6 +1340,7 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
             <h3>✅ Все исправления v4.0.1 успешно применены</h3>
             <ul class="fixes-list">
                 <li><strong>Красивая HTML главная страница</strong> вместо JSON ответа</li>
+                <li><strong>HTML версии для ВСЕХ основных endpoints</strong> (/health, /stats, /ping-test)</li>
                 <li><strong>Modern FastAPI lifespan events</strong> (убраны deprecated warnings)</li>
                 <li><strong>HEAD методы для мониторинга</strong> возвращают 200 OK</li>
                 <li><strong>Стабильная работа</strong> без перезапусков сервера</li>
@@ -1176,10 +1352,11 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
         </div>
         
         <div class="info-section">
-            <h3>🎯 Доступные API endpoints</h3>
-            <p><strong>Основные:</strong> /health, /ping, /api/stats/overview</p>
+            <h3>🎯 Доступные endpoints</h3>
+            <p><strong>HTML страницы:</strong> /, /health, /ping-test, /stats</p>
+            <p><strong>JSON API:</strong> /ping, /api/stats/overview, /api/leaderboard</p>
             <p><strong>Пользователи:</strong> /api/users/{{user_id}}, /api/users/{{user_id}}/tasks, /api/users/{{user_id}}/stats</p>
-            <p><strong>Глобальные:</strong> /api/leaderboard, /api/categories, /api/achievements</p>
+            <p><strong>Глобальные:</strong> /api/categories, /api/achievements</p>
             <p><strong>Админские:</strong> /api/admin/stats, /api/admin/cache/clear</p>
             {f'<p><strong>Документация:</strong> <a href="/docs" style="color: #4CAF50;">/docs</a></p>' if settings.DEBUG else ''}
         </div>
@@ -1188,7 +1365,7 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
     <div class="footer">
         <p>🎯 {settings.PROJECT_NAME} - Сделано с ❤️ для повышения продуктивности</p>
         <p>Последнее обновление: <span class="current-time">{current_time}</span></p>
-        <p>Полный функционал сохранен • Все исправления применены • Стабильная работа 24/7</p>
+        <p>Полный функционал сохранен • Все исправления применены • HTML страницы работают • Стабильная работа 24/7</p>
     </div>
     
     <script>
@@ -1226,22 +1403,13 @@ def get_beautiful_homepage_html(stats: Dict[str, Any]) -> str:
         window.addEventListener('load', () => {{
             setTimeout(animateNumbers, 800);
         }});
-        
-        // Показываем статус загрузки для ссылок
-        document.querySelectorAll('.nav-link').forEach(link => {{
-            link.addEventListener('click', function(e) {{
-                if (this.href.includes('/api/')) {{
-                    this.innerHTML += ' <span class="loading-animation"></span>';
-                }}
-            }});
-        }});
     </script>
 </body>
 </html>
     """
 
 # ============================================================================
-# ✅ ОСНОВНЫЕ ЭНДПОИНТЫ - ИСПРАВЛЕННЫЕ
+# ✅ ОСНОВНЫЕ ЭНДПОИНТЫ - ИСПРАВЛЕННЫЕ С HTML ВЕРСИЯМИ
 # ============================================================================
 
 @app.head("/")
@@ -1284,35 +1452,245 @@ async def health_head():
     """✅ Health check HEAD метод - ИСПРАВЛЕНИЕ v4.0.1"""
     return Response(status_code=200)
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """✅ Подробный health check endpoint - ОБНОВЛЕН для v4.0.1"""
+@app.get("/health")
+async def health_check(format: str = None):
+    """
+    ✅ Health check с HTML версией - ИСПРАВЛЕНИЕ для красивого отображения
+    """
     uptime = datetime.now() - app.state.start_time
     
-    return HealthResponse(
-        status="healthy",
-        service=settings.PROJECT_NAME,  # Обновленное название v4.0.1
-        version=settings.VERSION,  # 4.0.1
-        database=db_manager.db_type,
-        cache=cache_manager.cache_type,
-        uptime=str(uptime)
-    )
+    health_data = {
+        "status": "healthy",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "database": db_manager.db_type,
+        "cache": cache_manager.cache_type,
+        "uptime": str(uptime),
+        "fixes_applied": [
+            "HTML главная страница",
+            "HTML версии endpoints",
+            "Modern lifespan events", 
+            "HEAD методы 200 OK",
+            "Стабильная работа"
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Если запрашивается JSON (API)
+    if format == "json":
+        return JSONResponse(content=health_data)
+    
+    # По умолчанию возвращаем красивую HTML страницу
+    content = f"""
+        <div class="content-card">
+            <h2>📋 Health Check - Проверка системы</h2>
+            
+            <div class="status-badge">✅ {health_data['status'].upper()}</div>
+            
+            <div class="data-grid">
+                <div class="data-item">
+                    <strong>Сервис:</strong><br>
+                    {health_data['service']}
+                </div>
+                <div class="data-item">
+                    <strong>Версия:</strong><br>
+                    {health_data['version']}
+                </div>
+                <div class="data-item">
+                    <strong>База данных:</strong><br>
+                    {health_data['database']}
+                </div>
+                <div class="data-item">
+                    <strong>Кэширование:</strong><br>
+                    {health_data['cache']}
+                </div>
+                <div class="data-item">
+                    <strong>Время работы:</strong><br>
+                    {health_data['uptime']}
+                </div>
+                <div class="data-item">
+                    <strong>Последняя проверка:</strong><br>
+                    <span class="current-time">{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</span>
+                </div>
+            </div>
+            
+            <h3>✅ Применённые исправления v4.0.1:</h3>
+            <ul style="margin: 15px 0; padding-left: 20px;">
+                {"".join(f"<li>{fix}</li>" for fix in health_data['fixes_applied'])}
+            </ul>
+            
+            <div class="nav-links">
+                <a href="/ping-test" class="nav-link">⚡ Ping Test</a>
+                <a href="/stats" class="nav-link">📊 Статистика</a>
+                <a href="/health?format=json" class="nav-link">📄 JSON версия</a>
+                <a href="/api/stats/overview" class="nav-link">📊 API Stats</a>
+            </div>
+            
+            <details style="margin-top: 20px;">
+                <summary style="cursor: pointer; margin-bottom: 10px;">🔍 Технические данные (JSON)</summary>
+                <div class="json-data">
+                    {json.dumps(health_data, ensure_ascii=False, indent=2)}
+                </div>
+            </details>
+        </div>
+    """
+    
+    html_content = get_base_html_template("Health Check", content)
+    return HTMLResponse(content=html_content)
 
 @app.get("/ping")
 async def ping():
-    """✅ Простой ping endpoint - ОБНОВЛЕН для v4.0.1"""
+    """✅ Простой ping endpoint для API - JSON версия"""
     return {
         "ping": "pong", 
         "version": settings.VERSION,
         "status": "fixed_and_stable",
         "fixes_applied": [
             "HTML главная страница",
+            "HTML версии endpoints",
             "Modern lifespan events",
             "HEAD методы 200 OK",
             "Стабильная работа"
         ],
         "timestamp": datetime.now().isoformat()
     }
+
+@app.get("/ping-test")
+async def ping_test_page():
+    """
+    ✅ HTML страница ping test
+    """
+    ping_data = {
+        "ping": "pong", 
+        "version": settings.VERSION,
+        "status": "fixed_and_stable",
+        "timestamp": datetime.now().isoformat(),
+        "server_time": datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
+        "fixes_applied": [
+            "HTML главная страница",
+            "HTML версии endpoints",
+            "Modern lifespan events",
+            "HEAD методы 200 OK",
+            "Стабильная работа"
+        ]
+    }
+    
+    content = f"""
+        <div class="content-card">
+            <h2>⚡ Ping Test - Проверка связи</h2>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <div style="background: #4CAF50; color: white; padding: 20px; border-radius: 15px; display: inline-block;">
+                    <h3 style="margin: 0; font-size: 2em;">🏓 PONG!</h3>
+                    <p style="margin: 10px 0 0 0;">Сервер отвечает</p>
+                </div>
+            </div>
+            
+            <div class="data-grid">
+                <div class="data-item">
+                    <strong>Ответ сервера:</strong><br>
+                    {ping_data['ping'].upper()}
+                </div>
+                <div class="data-item">
+                    <strong>Версия:</strong><br>
+                    {ping_data['version']}
+                </div>
+                <div class="data-item">
+                    <strong>Статус:</strong><br>
+                    {ping_data['status']}
+                </div>
+                <div class="data-item">
+                    <strong>Время сервера:</strong><br>
+                    <span class="current-time">{ping_data['server_time']}</span>
+                </div>
+            </div>
+            
+            <div class="nav-links">
+                <a href="/health" class="nav-link">📋 Health Check</a>
+                <a href="/stats" class="nav-link">📊 Статистика</a>
+                <a href="/ping" class="nav-link">📄 JSON API</a>
+            </div>
+            
+            <details style="margin-top: 20px;">
+                <summary style="cursor: pointer;">🔍 Технические данные</summary>
+                <div class="json-data">
+                    {json.dumps(ping_data, ensure_ascii=False, indent=2)}
+                </div>
+            </details>
+        </div>
+    """
+    
+    html_content = get_base_html_template("Ping Test", content)
+    return HTMLResponse(content=html_content)
+
+@app.get("/stats")
+async def stats_page():
+    """
+    ✅ HTML страница статистики
+    """
+    try:
+        stats = db_manager.get_global_stats()
+        
+        content = f"""
+            <div class="content-card">
+                <h2>📊 Общая статистика системы</h2>
+                
+                <div class="data-grid">
+                    <div class="data-item">
+                        <strong>👥 Всего пользователей:</strong><br>
+                        <span style="font-size: 2em; color: #4CAF50;">{stats.get('total_users', 0)}</span>
+                    </div>
+                    <div class="data-item">
+                        <strong>⚡ Активных пользователей:</strong><br>
+                        <span style="font-size: 2em; color: #2196F3;">{stats.get('active_users', 0)}</span>
+                    </div>
+                    <div class="data-item">
+                        <strong>📝 Всего задач:</strong><br>
+                        <span style="font-size: 2em; color: #FF9800;">{stats.get('total_tasks', 0)}</span>
+                    </div>
+                    <div class="data-item">
+                        <strong>✅ Выполнено задач:</strong><br>
+                        <span style="font-size: 2em; color: #4CAF50;">{stats.get('completed_tasks', 0)}</span>
+                    </div>
+                    <div class="data-item">
+                        <strong>📈 Процент выполнения:</strong><br>
+                        <span style="font-size: 2em; color: #9C27B0;">{stats.get('completion_rate', 0)}%</span>
+                    </div>
+                    <div class="data-item">
+                        <strong>🗄️ Тип БД:</strong><br>
+                        {stats.get('database_type', 'unknown')}
+                    </div>
+                </div>
+                
+                <div class="nav-links">
+                    <a href="/api/stats/overview" class="nav-link">📄 JSON API</a>
+                    <a href="/api/leaderboard" class="nav-link">🏆 Лидерборд</a>
+                    <a href="/api/categories" class="nav-link">📁 Категории</a>
+                    <a href="/api/achievements" class="nav-link">🎯 Достижения</a>
+                </div>
+                
+                <details style="margin-top: 20px;">
+                    <summary style="cursor: pointer;">🔍 Полные данные (JSON)</summary>
+                    <div class="json-data">
+                        {json.dumps(stats, ensure_ascii=False, indent=2)}
+                    </div>
+                </details>
+            </div>
+        """
+        
+        html_content = get_base_html_template("Статистика", content)
+        return HTMLResponse(content=html_content)
+        
+    except Exception as e:
+        error_content = f"""
+            <div class="content-card">
+                <h2>❌ Ошибка получения статистики</h2>
+                <p>Произошла ошибка при загрузке данных: {str(e)}</p>
+                <a href="/api/stats/overview" class="nav-link" style="display: inline-block; margin-top: 20px;">📄 Попробовать JSON API</a>
+            </div>
+        """
+        html_content = get_base_html_template("Ошибка", error_content)
+        return HTMLResponse(content=html_content)
 
 # ============================================================================
 # API МАРШРУТЫ (СОХРАНЕНЫ ВСЕ БЕЗ ИЗМЕНЕНИЙ)
@@ -1497,6 +1875,7 @@ async def get_admin_stats():
                 "version": settings.VERSION,  # v4.0.1
                 "fixes_applied": [
                     "HTML главная страница",
+                    "HTML версии endpoints",
                     "Modern lifespan events",
                     "HEAD методы 200 OK",
                     "Стабильная работа"
@@ -1588,15 +1967,6 @@ async def periodic_cleanup():
             break
         except Exception as e:
             logger.error(f"❌ Ошибка в periodic_cleanup: {e}")
-
-# ============================================================================
-# ❌ УДАЛЯЕМ DEPRECATED @app.on_event - ЗАМЕНЕНЫ НА MODERN LIFESPAN ВЫШЕ
-# ============================================================================
-
-# ❌ УБРАНО - DEPRECATED:
-# @app.on_event("startup")
-# @app.on_event("shutdown")
-# ✅ ЗАМЕНЕНО НА MODERN lifespan() ВЫШЕ
 
 # ============================================================================
 # MAIN ФУНКЦИЯ (СОХРАНЕНА БЕЗ ИЗМЕНЕНИЙ)
