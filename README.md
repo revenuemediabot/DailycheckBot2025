@@ -8,48 +8,46 @@
 
 ```bash
 DailyCheckBot2025/
-├── main.py                    # Основной лаунчер бота
-├── config.py                  # Конфигурация проекта
-├── database.py                # Работа с хранилищем данных (JSON)
-├── handlers/                  # Модули Telegram-команд
-│   ├── __init__.py
-│   ├── tasks.py
-│   ├── ai_functions.py
-│   ├── social.py
-│   ├── stats.py
-│   ├── reminders.py
-│   ├── settings.py
-│   ├── admin.py
-│   └── utils.py
-├── models/                    # Модели данных
-│   ├── __init__.py
-│   ├── user.py
-│   ├── task.py
-│   └── achievement.py
-├── dashboard/                 # Веб-дашборд (FastAPI + HTML)
-│   ├── app.py
-│   ├── config.py
-│   ├── core/
-│   │   └── data_manager.py
-│   ├── templates/
-│   │   └── dashboard.html
+├── .env / .env.example
+├── PROJECT_CONTEXT.md / README.md
+├── config.py / main.py / render.yaml
+├── requirements*.txt
+├── bot/
+│   ├── application.py
+│   ├── init.py
+│   └── middleware.py
+├── dashboard/
+│   ├── app.py / config.py / dependencies.py / render.yaml / requirements*.txt
 │   ├── api/
-│   │   ├── users.py
-│   │   ├── tasks.py
-│   │   ├── stats.py
-│   │   ├── charts.py
-│   │   └── dependencies.py
-├── shared/                    # Общие компоненты бота и дашборда
-│   └── models.py
-├── data/                      # Хранилище данных (создается автоматически)
-│   ├── users/
-│   └── backups/
-├── logs/                      # Логи бота и дашборда
-├── exports/                   # Экспортируемые данные
-├── scripts/                   # Скрипты запуска
-│   ├── start_bot.py
-│   ├── start_web.py
-│   └── health_check.py
+│   ├── core/
+│   ├── scripts/
+│   ├── shared/
+│   └── templates/
+├── data/
+│   ├── tasks.json
+│   └── users.json
+├── database/
+│   ├── history.py / init.py / manager.py / migrations.py
+├── handlers/
+│   ├── init.py / messages.py / router.py / tasks.py / utils.py
+│   ├── callbacks/
+│   └── commands/
+├── localization/
+│   ├── __init__.py / ru.py
+├── models/
+│   ├── achievement.py ... user.py (модели)
+├── scripts/
+│   ├── health_check.py / start_bot.py / start_web.py / start_web_fixed.py
+├── services/
+│   ├── ai_service.py ... timer_service.py
+│   ├── ai/
+│   └── __init__.py
+├── shared/
+│   ├── models.py
+├── ui/
+│   ├── keyboards.py / messages.py / progress.py / themes.py
+├── utils/
+│   ├── constants.py ... validators.py
 ├── requirements-bot.txt       # Зависимости Telegram-бота
 ├── requirements-web.txt       # Зависимости дашборда
 ├── .env.example               # Переменные окружения
