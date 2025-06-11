@@ -1,23 +1,371 @@
-python-telegram-bot==20.7
-nest-asyncio==1.5.8
-python-dotenv==1.0.0
-aiohttp==3.9.1
-requests==2.31.0
-APScheduler==3.10.4
-pytz==2023.3
-pandas==2.1.4
-openpyxl==3.1.2
-psutil==5.9.6
-pydantic==2.5.2
-openai==1.6.1
-sqlalchemy>=2.0.0
-alembic>=1.12.0
-aiosqlite>=0.19.0
-psycopg2-binary>=2.9.0
-databases[postgresql,sqlite]>=0.8.0
-fastapi>=0.104.1
-uvicorn>=0.24.0
-redis>=5.0.0
-aioredis>=2.0.0
-diskcache>=5.6.0  # Альтернатива Redis
+# requirements.txt - Основные зависимости бота
+# DailyCheck Bot v4.0 - Python dependencies
 
+# Telegram Bot API
+python-telegram-bot>=20.7
+nest-asyncio>=1.5.8
+
+# OpenAI для AI функций
+openai>=1.3.0
+
+# Планировщик задач
+APScheduler>=3.10.4
+
+# Обработка данных
+pandas>=2.1.0
+
+# Системные метрики
+psutil>=5.9.0
+
+# Асинхронные HTTP запросы
+httpx>=0.25.0
+aiohttp>=3.9.0
+
+# Логирование и мониторинг
+structlog>=23.2.0
+
+# Утилиты
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+# requirements-web.txt - Дополнительные зависимости для веб-дашборда
+# FastAPI веб-дашборд
+
+# Веб-фреймворк
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+
+# Шаблоны
+jinja2>=3.1.2
+
+# Статические файлы
+aiofiles>=23.2.1
+
+# CORS поддержка
+python-multipart>=0.0.6
+
+# requirements-dev.txt - Зависимости для разработки
+# Development dependencies
+
+# Тестирование
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Форматирование кода
+black>=23.0.0
+isort>=5.12.0
+
+# Линтеры
+flake8>=6.0.0
+pylint>=3.0.0
+
+# Типизация
+mypy>=1.7.0
+
+# Документация
+sphinx>=7.2.0
+sphinx-rtd-theme>=1.3.0
+
+# requirements-docker.txt - Минимальные зависимости для Docker
+# Minimal dependencies for Docker container
+
+python-telegram-bot>=20.7
+nest-asyncio>=1.5.8
+openai>=1.3.0
+APScheduler>=3.10.4
+psutil>=5.9.0
+python-dotenv>=1.0.0
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.2
+
+# .env.example - Пример переменных окружения
+# DailyCheck Bot v4.0 - Environment Variables Example
+# Скопируйте этот файл в .env и заполните реальными значениями
+
+# ===== ОСНОВНЫЕ НАСТРОЙКИ =====
+
+# Токен Telegram бота (получить у @BotFather)
+BOT_TOKEN=your_bot_token_here
+
+# OpenAI API ключ для AI функций (получить на platform.openai.com)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Telegram ID администратора бота (ваш ID)
+ADMIN_USER_ID=your_telegram_id
+
+# ===== СЕТЕВЫЕ НАСТРОЙКИ =====
+
+# Порт для HTTP сервера (для health checks и метрик)
+PORT=8080
+
+# Хост для привязки сервера
+HOST=0.0.0.0
+
+# URL для webhook (если используется)
+WEBHOOK_URL=
+
+# ===== ФАЙЛОВАЯ СИСТЕМА =====
+
+# Директория для данных
+DATA_DIR=data
+
+# Директория для экспорта
+EXPORT_DIR=exports
+
+# Директория для бэкапов
+BACKUP_DIR=backups
+
+# Директория для логов
+LOG_DIR=logs
+
+# ===== AI НАСТРОЙКИ =====
+
+# Модель OpenAI для использования
+OPENAI_MODEL=gpt-3.5-turbo
+
+# Максимальное количество токенов для ответа
+OPENAI_MAX_TOKENS=1000
+
+# Включить AI чат по умолчанию
+AI_CHAT_ENABLED=true
+
+# ===== GOOGLE SHEETS ИНТЕГРАЦИЯ =====
+
+# ID Google Sheets документа
+GOOGLE_SHEET_ID=
+
+# Файл с credentials для Google API
+GOOGLE_CREDENTIALS_FILE=service_account.json
+
+# ===== ПРОИЗВОДИТЕЛЬНОСТЬ =====
+
+# Максимальное количество пользователей в кэше
+MAX_USERS_CACHE=1000
+
+# Интервал автоматического бэкапа (часы)
+BACKUP_INTERVAL_HOURS=6
+
+# Уровень логирования (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL=INFO
+
+# Режим отладки
+DEBUG_MODE=false
+
+# ===== ВЕБ-ДАШБОРД =====
+
+# Секретный ключ для дашборда
+DASHBOARD_SECRET_KEY=your-secret-key-here
+
+# Порт для веб-дашборда
+DASHBOARD_PORT=8081
+
+# Хост для веб-дашборда
+DASHBOARD_HOST=0.0.0.0
+
+# ===== ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ =====
+
+# Путь к файлу базы данных
+DATABASE_PATH=data/database.json
+
+# Включить детальное логирование HTTP запросов
+HTTP_DEBUG=false
+
+# Таймаут для внешних API запросов (секунды)
+API_TIMEOUT=30
+
+# Максимальный размер файла для экспорта (MB)
+MAX_EXPORT_SIZE=50
+
+# pyproject.toml - Конфигурация проекта Python
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dailycheck-bot"
+version = "4.0.0"
+description = "Модульный Telegram бот для отслеживания ежедневных привычек и задач с AI-ассистентом"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "AI Assistant", email = "ai@example.com"}
+]
+keywords = ["telegram", "bot", "productivity", "habits", "ai", "tasks"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Office/Business :: Scheduling",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "python-telegram-bot>=20.7",
+    "nest-asyncio>=1.5.8",
+    "openai>=1.3.0",
+    "APScheduler>=3.10.4",
+    "pandas>=2.1.0",
+    "psutil>=5.9.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "jinja2>=3.1.2"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.7.0"
+]
+docs = [
+    "sphinx>=7.2.0",
+    "sphinx-rtd-theme>=1.3.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/dailycheck-bot"
+Repository = "https://github.com/your-username/dailycheck-bot"
+Documentation = "https://dailycheck-bot.readthedocs.io"
+"Bug Tracker" = "https://github.com/your-username/dailycheck-bot/issues"
+
+[project.scripts]
+dailycheck = "main:main"
+dailycheck-dashboard = "dashboard.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*", "docs*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "telegram.*",
+    "openai.*",
+    "pandas.*",
+    "psutil.*",
+    "apscheduler.*"
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]
+
+# setup.cfg - Дополнительная конфигурация
+[metadata]
+name = dailycheck-bot
+version = 4.0.0
+
+[options]
+zip_safe = False
+include_package_data = True
+python_requires = >=3.8
+
+[flake8]
+max-line-length = 100
+extend-ignore = E203, E266, E501, W503, F403, F401
+max-complexity = 18
+select = B,C,E,F,W,T4,B9
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    .eggs,
+    *.egg,
+    build,
+    dist,
+    docs,
+    tests/fixtures
+
+[coverage:run]
+source = .
+omit = 
+    */tests/*
+    */test_*
+    setup.py
+    */venv/*
+    */.venv/*
+
+[coverage:report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if self.debug:
+    if settings.DEBUG
+    raise AssertionError
+    raise NotImplementedError
+    if 0:
+    if __name__ == .__main__.:
+    class .*\bProtocol\):
+    @(abc\.)?abstractmethod
