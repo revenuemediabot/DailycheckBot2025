@@ -1,1051 +1,1213 @@
-# services/data_service.py
+# services/task_service.py
 
 import asyncio
-import json
 import logging
-import threading
-import time
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-import os
+import uuid
+from datetime import datetime, date, timedelta
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field, asdict
+from enum import Enum
 
-# Проверяем доступность pandas
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
+# Импортируем сервис данных
+from services.data_service import get_data_service, DataService
 
 logger = logging.getLogger(__name__)
 
-class DataServiceConfig:
-    """Конфигурация для сервиса данных"""
+# ===== ЕНУМЫ И КОНСТАНТЫ =====
+
+class TaskStatus(Enum):
+    """Статусы задач"""
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+
+class TaskPriority(Enum):
+    """Приоритеты задач"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+class TaskCategory(Enum):
+    """Категории задач"""
+    WORK = "work"
+    HEALTH = "health"
+    LEARNING = "learning"
+    PERSONAL = "personal"
+    FINANCE = "finance"
+
+# ===== МОДЕЛИ ДАННЫХ =====
+
+@dataclass
+class TaskCompletion:
+    """Запись о выполнении задачи"""
+    date: str  # ISO формат даты (YYYY-MM-DD)
+    completed: bool
+    note: Optional[str] = None
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    time_spent: Optional[int] = None  # в минутах
     
-    # Директории
-    DATA_DIR = Path(os.getenv('DATA_DIR', 'data'))
-    BACKUP_DIR = Path(os.getenv('BACKUP_DIR', 'backups'))
-    EXPORT_DIR = Path(os.getenv('EXPORT_DIR', 'exports'))
-    
-    # Настройки кэша
-    MAX_USERS_CACHE = int(os.getenv('MAX_USERS_CACHE', 1000))
-    
-    # Настройки бэкапов
-    BACKUP_INTERVAL_HOURS = int(os.getenv('BACKUP_INTERVAL_HOURS', 6))
-    MAX_BACKUPS_KEEP = int(os.getenv('MAX_BACKUPS_KEEP', 10))
-    
-    # Файлы данных
-    USERS_DATA_FILE = 'users_data.json'
-    ANALYTICS_DATA_FILE = 'analytics_data.json'
-    SYSTEM_LOG_FILE = 'system_log.json'
+    def to_dict(self) -> dict:
+        return asdict(self)
     
     @classmethod
-    def ensure_directories(cls):
-        """Создание необходимых директорий"""
-        for directory in [cls.DATA_DIR, cls.BACKUP_DIR, cls.EXPORT_DIR]:
-            directory.mkdir(exist_ok=True)
-            logger.debug(f"Директория создана/проверена: {directory}")
+    def from_dict(cls, data: dict) -> "TaskCompletion":
+        return cls(**data)
 
-class DataService:
+@dataclass 
+class Subtask:
+    """Подзадача"""
+    subtask_id: str
+    title: str
+    completed: bool = False
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    
+    def to_dict(self) -> dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "Subtask":
+        return cls(**data)
+
+@dataclass
+class Task:
+    """Модель задачи с полным функционалом"""
+    task_id: str
+    user_id: int
+    title: str
+    description: Optional[str] = None
+    category: str = "personal"
+    priority: str = "medium"
+    status: str = "active"
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    completions: List[TaskCompletion] = field(default_factory=list)
+    subtasks: List[Subtask] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    is_daily: bool = True
+    reminder_time: Optional[str] = None
+    estimated_time: Optional[int] = None  # в минутах
+    difficulty: int = 1  # 1-5
+    
+    @property
+    def current_streak(self) -> int:
+        """Текущая серия выполнения"""
+        if not self.completions:
+            return 0
+        
+        completed_dates = [
+            date.fromisoformat(c.date) for c in self.completions 
+            if c.completed
+        ]
+        completed_dates.sort(reverse=True)
+        
+        if not completed_dates:
+            return 0
+        
+        streak = 0
+        current_date = date.today()
+        
+        for comp_date in completed_dates:
+            if comp_date == current_date:
+                streak += 1
+                current_date = date.fromordinal(current_date.toordinal() - 1)
+            else:
+                break
+        
+        return streak
+    
+    @property
+    def completion_rate_week(self) -> float:
+        """Процент выполнения за последнюю неделю"""
+        week_ago = date.today() - timedelta(days=7)
+        week_completions = [
+            c for c in self.completions 
+            if date.fromisoformat(c.date) >= week_ago and c.completed
+        ]
+        return len(week_completions) / 7 * 100
+    
+    @property
+    def completion_rate_month(self) -> float:
+        """Процент выполнения за последний месяц"""
+        month_ago = date.today() - timedelta(days=30)
+        month_completions = [
+            c for c in self.completions 
+            if date.fromisoformat(c.date) >= month_ago and c.completed
+        ]
+        return len(month_completions) / 30 * 100
+    
+    @property
+    def subtasks_completed_count(self) -> int:
+        """Количество выполненных подзадач"""
+        return sum(1 for subtask in self.subtasks if subtask.completed)
+    
+    @property
+    def subtasks_total_count(self) -> int:
+        """Общее количество подзадач"""
+        return len(self.subtasks)
+    
+    @property
+    def xp_value(self) -> int:
+        """XP за выполнение задачи"""
+        base_xp = {"low": 10, "medium": 20, "high": 30}.get(self.priority, 20)
+        difficulty_multiplier = self.difficulty * 0.2 + 0.8
+        streak_bonus = min(self.current_streak * 2, 50)
+        return int(base_xp * difficulty_multiplier + streak_bonus)
+    
+    def is_completed_today(self) -> bool:
+        """Проверка выполнения задачи сегодня"""
+        today = date.today().isoformat()
+        return any(c.date == today and c.completed for c in self.completions)
+    
+    def mark_completed(self, note: Optional[str] = None, time_spent: Optional[int] = None) -> bool:
+        """Отметить задачу как выполненную на сегодня"""
+        today = date.today().isoformat()
+        
+        # Проверяем, не выполнена ли уже сегодня
+        for completion in self.completions:
+            if completion.date == today:
+                completion.completed = True
+                completion.note = note
+                completion.time_spent = time_spent
+                completion.timestamp = datetime.now().isoformat()
+                return True
+        
+        # Добавляем новую запись
+        self.completions.append(TaskCompletion(
+            date=today,
+            completed=True,
+            note=note,
+            time_spent=time_spent
+        ))
+        return True
+    
+    def mark_uncompleted(self) -> bool:
+        """Отменить выполнение задачи на сегодня"""
+        today = date.today().isoformat()
+        
+        for completion in self.completions:
+            if completion.date == today:
+                completion.completed = False
+                completion.timestamp = datetime.now().isoformat()
+                return True
+        
+        return False
+    
+    def add_subtask(self, title: str) -> str:
+        """Добавить подзадачу"""
+        subtask = Subtask(
+            subtask_id=str(uuid.uuid4()),
+            title=title
+        )
+        self.subtasks.append(subtask)
+        return subtask.subtask_id
+    
+    def toggle_subtask(self, subtask_id: str) -> bool:
+        """Переключить статус подзадачи"""
+        for subtask in self.subtasks:
+            if subtask.subtask_id == subtask_id:
+                subtask.completed = not subtask.completed
+                return True
+        return False
+    
+    def update_field(self, field: str, value: Any) -> bool:
+        """Обновить поле задачи"""
+        if hasattr(self, field):
+            setattr(self, field, value)
+            return True
+        return False
+    
+    def to_dict(self) -> dict:
+        """Сериализация в словарь"""
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "description": self.description,
+            "category": self.category,
+            "priority": self.priority,
+            "status": self.status,
+            "created_at": self.created_at,
+            "completions": [c.to_dict() for c in self.completions],
+            "subtasks": [s.to_dict() for s in self.subtasks],
+            "tags": self.tags,
+            "is_daily": self.is_daily,
+            "reminder_time": self.reminder_time,
+            "estimated_time": self.estimated_time,
+            "difficulty": self.difficulty
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "Task":
+        """Десериализация из словаря"""
+        task = cls(
+            task_id=data["task_id"],
+            user_id=data["user_id"],
+            title=data["title"],
+            description=data.get("description"),
+            category=data.get("category", "personal"),
+            priority=data.get("priority", "medium"),
+            status=data.get("status", "active"),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+            tags=data.get("tags", []),
+            is_daily=data.get("is_daily", True),
+            reminder_time=data.get("reminder_time"),
+            estimated_time=data.get("estimated_time"),
+            difficulty=data.get("difficulty", 1)
+        )
+        
+        # Восстанавливаем записи о выполнении
+        if "completions" in data:
+            task.completions = [
+                TaskCompletion.from_dict(c) if isinstance(c, dict) else c
+                for c in data["completions"]
+            ]
+        
+        # Восстанавливаем подзадачи
+        if "subtasks" in data:
+            task.subtasks = [
+                Subtask.from_dict(s) if isinstance(s, dict) else s
+                for s in data["subtasks"]
+            ]
+        
+        return task
+
+# ===== СИСТЕМА ДОСТИЖЕНИЙ =====
+
+class AchievementSystem:
+    """Расширенная система достижений для задач"""
+    
+    ACHIEVEMENTS = {
+        'first_task': {
+            'title': 'Первые шаги',
+            'description': 'Создайте свою первую задачу',
+            'icon': '🎯',
+            'xp_reward': 50,
+            'condition': lambda user_data: len(user_data.get("tasks", {})) >= 1
+        },
+        'streak_3': {
+            'title': 'Начинающий',
+            'description': 'Поддерживайте streak 3 дня',
+            'icon': '🔥',
+            'xp_reward': 100,
+            'condition': lambda user_data: TaskService.get_max_streak_from_user_data(user_data) >= 3
+        },
+        'streak_7': {
+            'title': 'Неделя силы',
+            'description': 'Поддерживайте streak 7 дней',
+            'icon': '💪',
+            'xp_reward': 200,
+            'condition': lambda user_data: TaskService.get_max_streak_from_user_data(user_data) >= 7
+        },
+        'streak_30': {
+            'title': 'Мастер привычек',
+            'description': 'Поддерживайте streak 30 дней',
+            'icon': '💎',
+            'xp_reward': 500,
+            'condition': lambda user_data: TaskService.get_max_streak_from_user_data(user_data) >= 30
+        },
+        'streak_100': {
+            'title': 'Легенда',
+            'description': 'Поддерживайте streak 100 дней',
+            'icon': '👑',
+            'xp_reward': 1000,
+            'condition': lambda user_data: TaskService.get_max_streak_from_user_data(user_data) >= 100
+        },
+        'tasks_10': {
+            'title': 'Продуктивный',
+            'description': 'Выполните 10 задач',
+            'icon': '📈',
+            'xp_reward': 100,
+            'condition': lambda user_data: user_data.get("stats", {}).get("completed_tasks", 0) >= 10
+        },
+        'tasks_50': {
+            'title': 'Энтузиаст',
+            'description': 'Выполните 50 задач',
+            'icon': '🏆',
+            'xp_reward': 250,
+            'condition': lambda user_data: user_data.get("stats", {}).get("completed_tasks", 0) >= 50
+        },
+        'tasks_100': {
+            'title': 'Чемпион',
+            'description': 'Выполните 100 задач',
+            'icon': '🌟',
+            'xp_reward': 500,
+            'condition': lambda user_data: user_data.get("stats", {}).get("completed_tasks", 0) >= 100
+        },
+        'tasks_500': {
+            'title': 'Мастер продуктивности',
+            'description': 'Выполните 500 задач',
+            'icon': '⭐',
+            'xp_reward': 1000,
+            'condition': lambda user_data: user_data.get("stats", {}).get("completed_tasks", 0) >= 500
+        },
+        'all_categories': {
+            'title': 'Универсал',
+            'description': 'Создайте задачи во всех категориях',
+            'icon': '🌈',
+            'xp_reward': 200,
+            'condition': lambda user_data: TaskService.check_all_categories_used(user_data)
+        },
+        'perfect_week': {
+            'title': 'Идеальная неделя',
+            'description': 'Выполните все задачи 7 дней подряд',
+            'icon': '✨',
+            'xp_reward': 300,
+            'condition': lambda user_data: TaskService.check_perfect_week(user_data)
+        },
+        'subtask_master': {
+            'title': 'Мастер планирования',
+            'description': 'Создайте 10 подзадач',
+            'icon': '📋',
+            'xp_reward': 150,
+            'condition': lambda user_data: TaskService.count_total_subtasks(user_data) >= 10
+        },
+        'tag_organizer': {
+            'title': 'Организатор',
+            'description': 'Используйте 5 разных тегов',
+            'icon': '🏷️',
+            'xp_reward': 100,
+            'condition': lambda user_data: TaskService.count_unique_tags(user_data) >= 5
+        }
+    }
+    
+    @classmethod
+    def check_achievements(cls, user_data: Dict) -> List[str]:
+        """Проверка новых достижений пользователя"""
+        new_achievements = []
+        user_achievements = user_data.get("achievements", [])
+        
+        for achievement_id, achievement_data in cls.ACHIEVEMENTS.items():
+            if achievement_id not in user_achievements:
+                try:
+                    if achievement_data['condition'](user_data):
+                        user_achievements.append(achievement_id)
+                        new_achievements.append(achievement_id)
+                        
+                        # Добавляем XP за достижение
+                        xp_reward = achievement_data.get('xp_reward', 50)
+                        stats = user_data.setdefault("stats", {})
+                        stats["total_xp"] = stats.get("total_xp", 0) + xp_reward
+                        stats["daily_xp_earned"] = stats.get("daily_xp_earned", 0) + xp_reward
+                        
+                        # Пересчитываем уровень
+                        TaskService._update_user_level(stats)
+                        
+                        logger.info(f"🏆 Пользователь {user_data.get('user_id')} получил достижение: {achievement_id} (+{xp_reward} XP)")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Ошибка проверки достижения {achievement_id}: {e}")
+        
+        # Обновляем список достижений в данных пользователя
+        user_data["achievements"] = user_achievements
+        
+        return new_achievements
+    
+    @classmethod
+    def get_achievement_info(cls, achievement_id: str) -> Optional[Dict]:
+        """Получить информацию о достижении"""
+        return cls.ACHIEVEMENTS.get(achievement_id)
+    
+    @classmethod
+    def get_achievements_progress(cls, user_data: Dict) -> Dict[str, Dict]:
+        """Получить прогресс по всем достижениям"""
+        progress = {}
+        user_achievements = user_data.get("achievements", [])
+        
+        for achievement_id, achievement_data in cls.ACHIEVEMENTS.items():
+            is_earned = achievement_id in user_achievements
+            
+            # Пытаемся определить прогресс для некоторых достижений
+            current_progress = 0
+            target = 1
+            
+            if "tasks_" in achievement_id:
+                target = int(achievement_id.split("_")[1])
+                current_progress = user_data.get("stats", {}).get("completed_tasks", 0)
+            elif "streak_" in achievement_id:
+                target = int(achievement_id.split("_")[1])
+                current_progress = TaskService.get_max_streak_from_user_data(user_data)
+            
+            progress[achievement_id] = {
+                "title": achievement_data["title"],
+                "description": achievement_data["description"],
+                "icon": achievement_data["icon"],
+                "xp_reward": achievement_data["xp_reward"],
+                "is_earned": is_earned,
+                "progress": min(current_progress, target),
+                "target": target,
+                "progress_percentage": min((current_progress / target) * 100, 100) if target > 0 else 100
+            }
+        
+        return progress
+
+# ===== ОСНОВНОЙ СЕРВИС ЗАДАЧ =====
+
+class TaskService:
     """
-    Полный сервис для работы с данными пользователей
+    Полный сервис для работы с задачами пользователей
     
     Возможности:
-    - Загрузка и сохранение данных пользователей
-    - Кэширование в памяти для быстрого доступа
-    - Автоматическое создание бэкапов
-    - Экспорт данных в различных форматах
-    - Аналитика и метрики
-    - Транзакционная безопасность
+    - Создание, обновление, удаление задач
+    - Управление выполнением и streak'ами
+    - Работа с подзадачами и тегами
+    - Система достижений и XP
+    - Аналитика и статистика
+    - Фильтрация и поиск задач
     """
     
-    def __init__(self, data_file: str = None):
-        self.config = DataServiceConfig()
-        self.config.ensure_directories()
-        
-        # Файлы данных
-        self.data_file = self.config.DATA_DIR / (data_file or self.config.USERS_DATA_FILE)
-        self.analytics_file = self.config.DATA_DIR / self.config.ANALYTICS_DATA_FILE
-        self.system_log_file = self.config.DATA_DIR / self.config.SYSTEM_LOG_FILE
-        
-        # Кэш пользователей
-        self.users_cache: Dict[int, Any] = {}  # Any = User class from main.py
-        self.cache_lock = threading.RLock()
-        
-        # Метрики и состояние
-        self.last_save_time = time.time()
-        self.pending_saves = set()  # user_ids для сохранения
-        self.total_operations = 0
-        self.failed_operations = 0
-        
-        # Инициализация
-        self._initialize()
-        
-    def _initialize(self):
-        """Инициализация сервиса"""
+    def __init__(self, data_service: DataService = None):
+        self.data_service = data_service or get_data_service()
+        logger.info("✅ TaskService инициализирован")
+    
+    # ===== ОСНОВНЫЕ МЕТОДЫ CRUD =====
+    
+    async def create_task(self, user_id: int, title: str, **kwargs) -> str:
+        """Создать новую задачу"""
         try:
-            logger.info("🔧 Инициализация DataService...")
-            
-            # Загружаем данные
-            self._load_all_users()
-            
-            # Загружаем системные данные
-            self._load_system_data()
-            
-            # Запускаем фоновые задачи
-            self._start_background_tasks()
-            
-            logger.info(f"✅ DataService инициализирован. Пользователей в кэше: {len(self.users_cache)}")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка инициализации DataService: {e}")
-            raise
-    
-    def _load_all_users(self):
-        """Загрузка всех пользователей из файла"""
-        try:
-            if not self.data_file.exists():
-                logger.info("📂 Файл данных не найден, начинаем с пустой базы")
-                self.users_cache = {}
-                return
-            
-            # Читаем файл
-            with open(self.data_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if not isinstance(data, dict):
-                logger.warning("⚠️ Неверный формат файла данных")
-                self.users_cache = {}
-                return
-            
-            # Загружаем пользователей в кэш (сериализованный вид)
-            loaded_count = 0
-            with self.cache_lock:
-                for user_id_str, user_data in data.items():
-                    try:
-                        user_id = int(user_id_str)
-                        # Пока сохраняем как словарь, позже User класс десериализует
-                        self.users_cache[user_id] = user_data
-                        loaded_count += 1
-                    except (ValueError, TypeError) as e:
-                        logger.error(f"❌ Ошибка загрузки пользователя {user_id_str}: {e}")
-            
-            logger.info(f"📂 Загружено {loaded_count} пользователей из {self.data_file}")
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Ошибка парсинга JSON: {e}")
-            self._create_backup_and_reset()
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки данных: {e}")
-            self.users_cache = {}
-    
-    def _create_backup_and_reset(self):
-        """Создание бэкапа поврежденного файла и сброс"""
-        try:
-            if self.data_file.exists():
-                backup_name = f"corrupted_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                backup_path = self.config.BACKUP_DIR / backup_name
-                self.data_file.replace(backup_path)
-                logger.warning(f"🔄 Поврежденный файл перемещен в {backup_path}")
-            
-            self.users_cache = {}
-            logger.info("🆕 Создана новая чистая база данных")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка создания бэкапа: {e}")
-    
-    def _load_system_data(self):
-        """Загрузка системных данных и аналитики"""
-        try:
-            # Загружаем аналитику
-            if self.analytics_file.exists():
-                with open(self.analytics_file, 'r', encoding='utf-8') as f:
-                    analytics_data = json.load(f)
-                logger.debug(f"📊 Загружена аналитика: {len(analytics_data)} записей")
-            
-            # Загружаем системные логи
-            if self.system_log_file.exists():
-                with open(self.system_log_file, 'r', encoding='utf-8') as f:
-                    system_data = json.load(f)
-                logger.debug(f"📋 Загружены системные данные: {len(system_data)} записей")
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки системных данных: {e}")
-    
-    def _start_background_tasks(self):
-        """Запуск фоновых задач"""
-        try:
-            # Можно добавить APScheduler или asyncio tasks для:
-            # - Периодического сохранения
-            # - Создания бэкапов
-            # - Очистки старых файлов
-            logger.debug("🔄 Фоновые задачи запущены")
-        except Exception as e:
-            logger.error(f"❌ Ошибка запуска фоновых задач: {e}")
-    
-    # ===== ОСНОВНЫЕ МЕТОДЫ РАБОТЫ С ПОЛЬЗОВАТЕЛЯМИ =====
-    
-    def get_user_data(self, user_id: int) -> Optional[Dict]:
-        """Получить данные пользователя по ID"""
-        with self.cache_lock:
-            user_data = self.users_cache.get(user_id)
-            if user_data:
-                self.total_operations += 1
-                logger.debug(f"👤 Получены данные пользователя {user_id}")
-            return user_data
-    
-    def save_user_data(self, user_id: int, user_data: Dict):
-        """Сохранить данные пользователя в кэш"""
-        try:
-            with self.cache_lock:
-                self.users_cache[user_id] = user_data
-                self.pending_saves.add(user_id)
-                self.total_operations += 1
-                
-            logger.debug(f"💾 Данные пользователя {user_id} обновлены в кэше")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка сохранения пользователя {user_id}: {e}")
-            self.failed_operations += 1
-            raise
-    
-    def delete_user_data(self, user_id: int) -> bool:
-        """Удалить данные пользователя"""
-        try:
-            with self.cache_lock:
-                if user_id in self.users_cache:
-                    del self.users_cache[user_id]
-                    self.pending_saves.add(user_id)  # Для фиксации удаления
-                    logger.info(f"🗑️ Пользователь {user_id} удален")
-                    return True
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка удаления пользователя {user_id}: {e}")
-            self.failed_operations += 1
-            return False
-    
-    def user_exists(self, user_id: int) -> bool:
-        """Проверить существование пользователя"""
-        with self.cache_lock:
-            return user_id in self.users_cache
-    
-    def get_all_users_data(self) -> Dict[int, Dict]:
-        """Получить данные всех пользователей"""
-        with self.cache_lock:
-            return self.users_cache.copy()
-    
-    def get_users_count(self) -> int:
-        """Получить количество пользователей"""
-        return len(self.users_cache)
-    
-    # ===== СОХРАНЕНИЕ НА ДИСК =====
-    
-    def save_all_to_disk(self) -> bool:
-        """Синхронное сохранение всех данных на диск"""
-        try:
-            start_time = time.time()
-            
-            with self.cache_lock:
-                # Создаем резервную копию перед сохранением
-                if self.data_file.exists():
-                    backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    backup_path = self.config.BACKUP_DIR / backup_name
-                    self.data_file.replace(backup_path)
-                    logger.debug(f"💾 Создан бэкап: {backup_name}")
-                
-                # Конвертируем кэш для сохранения
-                data_to_save = {}
-                for user_id, user_data in self.users_cache.items():
-                    data_to_save[str(user_id)] = user_data
-                
-                # Атомарное сохранение через временный файл
-                temp_file = self.data_file.with_suffix('.tmp')
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-                
-                # Заменяем основной файл
-                temp_file.replace(self.data_file)
-                
-                # Обновляем метрики
-                self.last_save_time = time.time()
-                self.pending_saves.clear()
-                
-                save_duration = time.time() - start_time
-                logger.info(f"💾 Данные сохранены успешно за {save_duration:.2f}с ({len(self.users_cache)} пользователей)")
-                
-                return True
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка сохранения данных: {e}")
-            self.failed_operations += 1
-            return False
-    
-    async def save_all_to_disk_async(self) -> bool:
-        """Асинхронное сохранение всех данных на диск"""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.save_all_to_disk)
-    
-    def force_save(self):
-        """Принудительное сохранение"""
-        logger.info("🔄 Принудительное сохранение данных...")
-        return self.save_all_to_disk()
-    
-    # ===== ЭКСПОРТ ДАННЫХ =====
-    
-    def export_user_data(self, user_id: int, format: str = "json") -> Optional[bytes]:
-        """Экспорт данных пользователя в указанном формате"""
-        try:
-            user_data = self.get_user_data(user_id)
+            # Получаем данные пользователя
+            user_data = self.data_service.get_user_data(user_id)
             if not user_data:
-                logger.warning(f"⚠️ Пользователь {user_id} не найден для экспорта")
-                return None
+                user_data = self._create_empty_user_data(user_id)
             
-            if format.lower() == "json":
-                export_data = {
-                    "export_info": {
-                        "format": "json",
-                        "version": "4.0",
-                        "exported_at": datetime.now().isoformat(),
-                        "user_id": user_id
-                    },
-                    "user_data": user_data
-                }
-                
-                json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
-                logger.info(f"📤 JSON экспорт для пользователя {user_id} подготовлен")
-                return json_str.encode('utf-8')
+            # Создаем задачу
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                user_id=user_id,
+                title=title,
+                description=kwargs.get("description"),
+                category=kwargs.get("category", "personal"),
+                priority=kwargs.get("priority", "medium"),
+                difficulty=kwargs.get("difficulty", 1),
+                estimated_time=kwargs.get("estimated_time"),
+                tags=kwargs.get("tags", []),
+                is_daily=kwargs.get("is_daily", True)
+            )
             
-            elif format.lower() == "csv" and PANDAS_AVAILABLE:
-                # Экспорт задач в CSV
-                tasks_data = []
-                
-                if "tasks" in user_data:
-                    for task_id, task_info in user_data["tasks"].items():
-                        # Извлекаем данные о выполнении
-                        completions = task_info.get("completions", [])
-                        for completion in completions:
-                            tasks_data.append({
-                                "task_id": task_id,
-                                "title": task_info.get("title", ""),
-                                "category": task_info.get("category", ""),
-                                "priority": task_info.get("priority", ""),
-                                "status": task_info.get("status", ""),
-                                "date": completion.get("date", ""),
-                                "completed": completion.get("completed", False),
-                                "time_spent": completion.get("time_spent"),
-                                "note": completion.get("note", ""),
-                                "timestamp": completion.get("timestamp", "")
-                            })
-                
-                if tasks_data:
-                    df = pd.DataFrame(tasks_data)
-                    csv_data = df.to_csv(index=False)
-                    logger.info(f"📊 CSV экспорт для пользователя {user_id} подготовлен ({len(tasks_data)} записей)")
-                    return csv_data.encode('utf-8')
-                else:
-                    # Пустой CSV с заголовками
-                    headers = "task_id,title,category,priority,status,date,completed,time_spent,note,timestamp\n"
-                    return headers.encode('utf-8')
+            # Добавляем в данные пользователя
+            tasks = user_data.setdefault("tasks", {})
+            tasks[task.task_id] = task.to_dict()
             
-            elif format.lower() == "xlsx" and PANDAS_AVAILABLE:
-                # Экспорт в Excel
-                import io
-                
-                tasks_data = []
-                stats_data = []
-                
-                # Собираем данные задач
-                if "tasks" in user_data:
-                    for task_id, task_info in user_data["tasks"].items():
-                        completions = task_info.get("completions", [])
-                        for completion in completions:
-                            tasks_data.append({
-                                "task_id": task_id,
-                                "title": task_info.get("title", ""),
-                                "category": task_info.get("category", ""),
-                                "priority": task_info.get("priority", ""),
-                                "status": task_info.get("status", ""),
-                                "date": completion.get("date", ""),
-                                "completed": completion.get("completed", False),
-                                "time_spent": completion.get("time_spent"),
-                                "note": completion.get("note", "")
-                            })
-                
-                # Собираем статистику
-                if "stats" in user_data:
-                    stats = user_data["stats"]
-                    stats_data.append({
-                        "metric": "Всего задач",
-                        "value": stats.get("total_tasks", 0)
-                    })
-                    stats_data.append({
-                        "metric": "Выполнено задач",
-                        "value": stats.get("completed_tasks", 0)
-                    })
-                    stats_data.append({
-                        "metric": "Текущий streak",
-                        "value": stats.get("current_streak", 0)
-                    })
-                    stats_data.append({
-                        "metric": "Максимальный streak",
-                        "value": stats.get("longest_streak", 0)
-                    })
-                    stats_data.append({
-                        "metric": "Общий XP",
-                        "value": stats.get("total_xp", 0)
-                    })
-                    stats_data.append({
-                        "metric": "Уровень",
-                        "value": stats.get("level", 1)
-                    })
-                
-                # Создаем Excel файл
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    if tasks_data:
-                        df_tasks = pd.DataFrame(tasks_data)
-                        df_tasks.to_excel(writer, sheet_name='Задачи', index=False)
-                    
-                    if stats_data:
-                        df_stats = pd.DataFrame(stats_data)
-                        df_stats.to_excel(writer, sheet_name='Статистика', index=False)
-                
-                logger.info(f"📈 Excel экспорт для пользователя {user_id} подготовлен")
-                return output.getvalue()
+            # Обновляем статистику
+            stats = user_data.setdefault("stats", {})
+            stats["total_tasks"] = stats.get("total_tasks", 0) + 1
             
-            else:
-                logger.warning(f"⚠️ Неподдерживаемый формат экспорта: {format}")
-                return None
-                
+            # Проверяем достижения
+            new_achievements = AchievementSystem.check_achievements(user_data)
+            
+            # Сохраняем
+            self.data_service.save_user_data(user_id, user_data)
+            
+            logger.info(f"✅ Создана задача {task.task_id} для пользователя {user_id}: {title}")
+            
+            return task.task_id
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка экспорта данных пользователя {user_id}: {e}")
+            logger.error(f"❌ Ошибка создания задачи для пользователя {user_id}: {e}")
+            raise
+    
+    async def get_task(self, user_id: int, task_id: str) -> Optional[Task]:
+        """Получить задачу по ID"""
+        try:
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return None
+            
+            tasks = user_data.get("tasks", {})
+            task_data = tasks.get(task_id)
+            
+            if task_data:
+                return Task.from_dict(task_data)
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения задачи {task_id} для пользователя {user_id}: {e}")
             return None
     
-    def export_all_users_data(self, format: str = "json") -> Optional[bytes]:
-        """Экспорт данных всех пользователей"""
+    async def get_user_tasks(self, user_id: int, status_filter: str = None) -> List[Task]:
+        """Получить все задачи пользователя с фильтрацией"""
         try:
-            if format.lower() == "json":
-                export_data = {
-                    "export_info": {
-                        "format": "json",
-                        "version": "4.0", 
-                        "exported_at": datetime.now().isoformat(),
-                        "total_users": len(self.users_cache)
-                    },
-                    "users_data": self.users_cache
-                }
-                
-                json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
-                logger.info(f"📤 Полный JSON экспорт подготовлен ({len(self.users_cache)} пользователей)")
-                return json_str.encode('utf-8')
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return []
             
-            else:
-                logger.warning(f"⚠️ Неподдерживаемый формат для полного экспорта: {format}")
-                return None
+            tasks = user_data.get("tasks", {})
+            task_objects = []
+            
+            for task_data in tasks.values():
+                task = Task.from_dict(task_data)
                 
+                # Применяем фильтр статуса
+                if status_filter and task.status != status_filter:
+                    continue
+                
+                task_objects.append(task)
+            
+            # Сортируем по приоритету и дате создания
+            priority_order = {"high": 3, "medium": 2, "low": 1}
+            task_objects.sort(
+                key=lambda t: (
+                    priority_order.get(t.priority, 2),
+                    datetime.fromisoformat(t.created_at)
+                ),
+                reverse=True
+            )
+            
+            return task_objects
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка полного экспорта: {e}")
-            return None
+            logger.error(f"❌ Ошибка получения задач пользователя {user_id}: {e}")
+            return []
     
-    # ===== БЭКАПЫ И ВОССТАНОВЛЕНИЕ =====
-    
-    def create_backup(self, backup_name: str = None) -> Optional[Path]:
-        """Создание бэкапа данных"""
+    async def update_task(self, user_id: int, task_id: str, **updates) -> bool:
+        """Обновить задачу"""
         try:
-            if not backup_name:
-                backup_name = f"manual_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            
-            backup_path = self.config.BACKUP_DIR / backup_name
-            
-            # Копируем текущий файл данных
-            if self.data_file.exists():
-                import shutil
-                shutil.copy2(self.data_file, backup_path)
-                logger.info(f"💾 Бэкап создан: {backup_path}")
-                return backup_path
-            else:
-                logger.warning("⚠️ Нет файла данных для создания бэкапа")
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка создания бэкапа: {e}")
-            return None
-    
-    def restore_from_backup(self, backup_path: Path) -> bool:
-        """Восстановление из бэкапа"""
-        try:
-            if not backup_path.exists():
-                logger.error(f"❌ Файл бэкапа не найден: {backup_path}")
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
                 return False
             
-            # Создаем бэкап текущих данных
-            current_backup = self.create_backup("pre_restore_backup.json")
-            if current_backup:
-                logger.info(f"💾 Текущие данные сохранены в {current_backup}")
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return False
             
-            # Восстанавливаем из бэкапа
-            import shutil
-            shutil.copy2(backup_path, self.data_file)
+            task_data = tasks[task_id]
             
-            # Перезагружаем данные
-            self._load_all_users()
+            # Обновляем поля
+            for field, value in updates.items():
+                if field in task_data:
+                    task_data[field] = value
             
-            logger.info(f"✅ Восстановление из {backup_path} завершено")
+            # Сохраняем изменения
+            self.data_service.save_user_data(user_id, user_data)
+            
+            logger.info(f"✅ Задача {task_id} обновлена для пользователя {user_id}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Ошибка восстановления из бэкапа: {e}")
+            logger.error(f"❌ Ошибка обновления задачи {task_id} для пользователя {user_id}: {e}")
             return False
     
-    def cleanup_old_backups(self, keep_count: int = None):
-        """Удаление старых бэкапов"""
+    async def delete_task(self, user_id: int, task_id: str) -> bool:
+        """Удалить задачу"""
         try:
-            if keep_count is None:
-                keep_count = self.config.MAX_BACKUPS_KEEP
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return False
             
-            backups = list(self.config.BACKUP_DIR.glob("backup_*.json"))
-            backups.extend(self.config.BACKUP_DIR.glob("manual_backup_*.json"))
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return False
             
-            if len(backups) <= keep_count:
-                logger.debug(f"📁 Количество бэкапов ({len(backups)}) не превышает лимит ({keep_count})")
-                return
+            # Удаляем задачу
+            del tasks[task_id]
             
-            # Сортируем по времени создания
-            backups.sort(key=lambda x: x.stat().st_mtime)
+            # Обновляем статистику
+            stats = user_data.setdefault("stats", {})
+            stats["total_tasks"] = max(0, stats.get("total_tasks", 0) - 1)
             
-            # Удаляем старые
-            to_delete = backups[:-keep_count]
-            deleted_count = 0
+            # Сохраняем изменения
+            self.data_service.save_user_data(user_id, user_data)
             
-            for backup in to_delete:
-                try:
-                    backup.unlink()
-                    deleted_count += 1
-                except Exception as e:
-                    logger.error(f"❌ Ошибка удаления бэкапа {backup}: {e}")
-            
-            logger.info(f"🗑️ Удалено {deleted_count} старых бэкапов")
+            logger.info(f"🗑️ Задача {task_id} удалена для пользователя {user_id}")
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Ошибка очистки бэкапов: {e}")
+            logger.error(f"❌ Ошибка удаления задачи {task_id} для пользователя {user_id}: {e}")
+            return False
     
-    def list_backups(self) -> List[Dict[str, Any]]:
-        """Получение списка доступных бэкапов"""
+    # ===== ВЫПОЛНЕНИЕ ЗАДАЧ =====
+    
+    async def complete_task(self, user_id: int, task_id: str, note: str = None, time_spent: int = None) -> bool:
+        """Отметить задачу как выполненную"""
         try:
-            backups = []
-            backup_files = list(self.config.BACKUP_DIR.glob("*.json"))
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return False
             
-            for backup_file in backup_files:
-                stat = backup_file.stat()
-                backups.append({
-                    "name": backup_file.name,
-                    "path": backup_file,
-                    "size": stat.st_size,
-                    "created": datetime.fromtimestamp(stat.st_ctime),
-                    "modified": datetime.fromtimestamp(stat.st_mtime)
-                })
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return False
             
-            # Сортируем по дате создания (новые первые)
-            backups.sort(key=lambda x: x["created"], reverse=True)
+            task_data = tasks[task_id]
+            task = Task.from_dict(task_data)
             
-            return backups
+            # Проверяем, не выполнена ли уже сегодня
+            if task.is_completed_today():
+                return False
+            
+            # Отмечаем как выполненную
+            if task.mark_completed(note, time_spent):
+                # Обновляем данные в хранилище
+                tasks[task_id] = task.to_dict()
+                
+                # Обновляем статистику пользователя
+                stats = user_data.setdefault("stats", {})
+                stats["completed_tasks"] = stats.get("completed_tasks", 0) + 1
+                stats["tasks_completed_today"] = stats.get("tasks_completed_today", 0) + 1
+                
+                # Добавляем XP
+                xp_earned = task.xp_value
+                stats["total_xp"] = stats.get("total_xp", 0) + xp_earned
+                stats["daily_xp_earned"] = stats.get("daily_xp_earned", 0) + xp_earned
+                
+                # Обновляем уровень
+                self._update_user_level(stats)
+                
+                # Обновляем максимальный streak
+                current_streak = task.current_streak
+                if current_streak > stats.get("longest_streak", 0):
+                    stats["longest_streak"] = current_streak
+                
+                # Проверяем достижения
+                new_achievements = AchievementSystem.check_achievements(user_data)
+                
+                # Сохраняем изменения
+                self.data_service.save_user_data(user_id, user_data)
+                
+                logger.info(f"✅ Задача {task_id} выполнена пользователем {user_id} (+{xp_earned} XP, streak: {current_streak})")
+                return True
+            
+            return False
             
         except Exception as e:
-            logger.error(f"❌ Ошибка получения списка бэкапов: {e}")
-            return []
+            logger.error(f"❌ Ошибка выполнения задачи {task_id} для пользователя {user_id}: {e}")
+            return False
     
-    # ===== АНАЛИТИКА И МЕТРИКИ =====
-    
-    def get_service_metrics(self) -> Dict[str, Any]:
-        """Получение метрик сервиса"""
-        return {
-            "users_count": len(self.users_cache),
-            "pending_saves": len(self.pending_saves),
-            "total_operations": self.total_operations,
-            "failed_operations": self.failed_operations,
-            "last_save_time": self.last_save_time,
-            "cache_size_mb": len(str(self.users_cache)) / 1024 / 1024,
-            "data_file_size": self.data_file.stat().st_size if self.data_file.exists() else 0,
-            "backups_count": len(list(self.config.BACKUP_DIR.glob("*.json")))
-        }
-    
-    def get_users_analytics(self) -> Dict[str, Any]:
-        """Получение аналитики по пользователям"""
+    async def uncomplete_task(self, user_id: int, task_id: str) -> bool:
+        """Отменить выполнение задачи"""
         try:
-            analytics = {
-                "total_users": len(self.users_cache),
-                "active_users": 0,
-                "total_tasks": 0,
-                "completed_tasks": 0,
-                "total_xp": 0,
-                "avg_level": 0,
-                "top_users_by_level": [],
-                "users_by_registration_date": {},
-                "tasks_by_category": {},
-                "completion_rate": 0
-            }
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return False
             
-            levels = []
-            registration_dates = []
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return False
             
-            for user_data in self.users_cache.values():
-                # Проверяем активность (есть задачи)
-                if user_data.get("tasks"):
-                    analytics["active_users"] += 1
-                
-                # Подсчитываем задачи
-                tasks = user_data.get("tasks", {})
-                analytics["total_tasks"] += len(tasks)
-                
-                # Анализируем задачи
-                for task_data in tasks.values():
-                    category = task_data.get("category", "unknown")
-                    analytics["tasks_by_category"][category] = analytics["tasks_by_category"].get(category, 0) + 1
-                    
-                    # Подсчитываем выполненные задачи
-                    completions = task_data.get("completions", [])
-                    completed = sum(1 for c in completions if c.get("completed", False))
-                    analytics["completed_tasks"] += completed
-                
-                # Статистика пользователя
-                stats = user_data.get("stats", {})
-                analytics["total_xp"] += stats.get("total_xp", 0)
-                
-                level = stats.get("level", 1)
-                levels.append(level)
-                
-                # Дата регистрации
-                reg_date = stats.get("registration_date", "")
-                if reg_date:
-                    reg_day = reg_date[:10]  # YYYY-MM-DD
-                    analytics["users_by_registration_date"][reg_day] = analytics["users_by_registration_date"].get(reg_day, 0) + 1
+            task_data = tasks[task_id]
+            task = Task.from_dict(task_data)
             
-            # Вычисляем средние показатели
-            if levels:
-                analytics["avg_level"] = sum(levels) / len(levels)
+            # Проверяем, выполнена ли сегодня
+            if not task.is_completed_today():
+                return False
             
-            if analytics["total_tasks"] > 0:
-                analytics["completion_rate"] = (analytics["completed_tasks"] / analytics["total_tasks"]) * 100
+            # Отменяем выполнение
+            if task.mark_uncompleted():
+                # Обновляем данные в хранилище
+                tasks[task_id] = task.to_dict()
+                
+                # Обновляем статистику пользователя
+                stats = user_data.setdefault("stats", {})
+                stats["completed_tasks"] = max(0, stats.get("completed_tasks", 0) - 1)
+                stats["tasks_completed_today"] = max(0, stats.get("tasks_completed_today", 0) - 1)
+                
+                # Отнимаем XP
+                xp_lost = task.xp_value
+                stats["total_xp"] = max(0, stats.get("total_xp", 0) - xp_lost)
+                stats["daily_xp_earned"] = max(0, stats.get("daily_xp_earned", 0) - xp_lost)
+                
+                # Пересчитываем уровень
+                self._update_user_level(stats)
+                
+                # Сохраняем изменения
+                self.data_service.save_user_data(user_id, user_data)
+                
+                logger.info(f"❌ Выполнение задачи {task_id} отменено для пользователя {user_id} (-{xp_lost} XP)")
+                return True
             
-            logger.debug(f"📊 Аналитика сгенерирована для {analytics['total_users']} пользователей")
-            return analytics
+            return False
             
         except Exception as e:
-            logger.error(f"❌ Ошибка генерации аналитики: {e}")
-            return {}
+            logger.error(f"❌ Ошибка отмены выполнения задачи {task_id} для пользователя {user_id}: {e}")
+            return False
     
-    def save_analytics_snapshot(self):
-        """Сохранение снимка аналитики"""
+    # ===== ПОДЗАДАЧИ =====
+    
+    async def add_subtask(self, user_id: int, task_id: str, subtitle: str) -> Optional[str]:
+        """Добавить подзадачу"""
         try:
-            analytics = self.get_users_analytics()
-            service_metrics = self.get_service_metrics()
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return None
             
-            snapshot = {
-                "timestamp": datetime.now().isoformat(),
-                "analytics": analytics,
-                "service_metrics": service_metrics
-            }
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return None
             
-            # Загружаем существующие снимки
-            snapshots = []
-            if self.analytics_file.exists():
-                with open(self.analytics_file, 'r', encoding='utf-8') as f:
-                    snapshots = json.load(f)
+            task_data = tasks[task_id]
+            task = Task.from_dict(task_data)
             
-            # Добавляем новый снимок
-            snapshots.append(snapshot)
+            # Добавляем подзадачу
+            subtask_id = task.add_subtask(subtitle)
             
-            # Ограничиваем количество снимков (последние 100)
-            if len(snapshots) > 100:
-                snapshots = snapshots[-100:]
+            # Обновляем данные в хранилище
+            tasks[task_id] = task.to_dict()
             
-            # Сохраняем
-            with open(self.analytics_file, 'w', encoding='utf-8') as f:
-                json.dump(snapshots, f, ensure_ascii=False, indent=2)
+            # Сохраняем изменения
+            self.data_service.save_user_data(user_id, user_data)
             
-            logger.info("📊 Снимок аналитики сохранен")
+            logger.info(f"✅ Подзадача {subtask_id} добавлена к задаче {task_id} для пользователя {user_id}")
+            return subtask_id
             
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения аналитики: {e}")
+            logger.error(f"❌ Ошибка добавления подзадачи для задачи {task_id} пользователя {user_id}: {e}")
+            return None
+    
+    async def toggle_subtask(self, user_id: int, task_id: str, subtask_id: str) -> bool:
+        """Переключить статус подзадачи"""
+        try:
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return False
+            
+            tasks = user_data.get("tasks", {})
+            if task_id not in tasks:
+                return False
+            
+            task_data = tasks[task_id]
+            task = Task.from_dict(task_data)
+            
+            # Переключаем подзадачу
+            if task.toggle_subtask(subtask_id):
+                # Обновляем данные в хранилище
+                tasks[task_id] = task.to_dict()
+                
+                # Сохраняем изменения
+                self.data_service.save_user_data(user_id, user_data)
+                
+                logger.info(f"✅ Подзадача {subtask_id} переключена для задачи {task_id} пользователя {user_id}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка переключения подзадачи {subtask_id} для задачи {task_id} пользователя {user_id}: {e}")
+            return False
     
     # ===== ПОИСК И ФИЛЬТРАЦИЯ =====
     
-    def search_users(self, query: str, field: str = "all") -> List[Dict[str, Any]]:
-        """Поиск пользователей по различным критериям"""
+    async def search_tasks(self, user_id: int, query: str, filters: Dict = None) -> List[Task]:
+        """Поиск задач по запросу и фильтрам"""
         try:
-            results = []
-            query_lower = query.lower()
+            all_tasks = await self.get_user_tasks(user_id)
             
-            for user_id, user_data in self.users_cache.items():
-                match = False
+            if not query and not filters:
+                return all_tasks
+            
+            results = []
+            query_lower = query.lower() if query else ""
+            
+            for task in all_tasks:
+                match = True
                 
-                if field == "all" or field == "username":
-                    username = user_data.get("username", "")
-                    if username and query_lower in username.lower():
-                        match = True
+                # Поиск по тексту
+                if query:
+                    text_match = (
+                        query_lower in task.title.lower() or
+                        (task.description and query_lower in task.description.lower()) or
+                        any(query_lower in tag.lower() for tag in task.tags)
+                    )
+                    if not text_match:
+                        match = False
                 
-                if field == "all" or field == "first_name":
-                    first_name = user_data.get("first_name", "")
-                    if first_name and query_lower in first_name.lower():
-                        match = True
-                
-                if field == "all" or field == "task_title":
-                    tasks = user_data.get("tasks", {})
-                    for task in tasks.values():
-                        if query_lower in task.get("title", "").lower():
-                            match = True
-                            break
+                # Применяем фильтры
+                if filters and match:
+                    if "category" in filters and task.category != filters["category"]:
+                        match = False
+                    
+                    if "priority" in filters and task.priority != filters["priority"]:
+                        match = False
+                    
+                    if "status" in filters and task.status != filters["status"]:
+                        match = False
+                    
+                    if "completed_today" in filters:
+                        is_completed = task.is_completed_today()
+                        if filters["completed_today"] != is_completed:
+                            match = False
+                    
+                    if "min_streak" in filters and task.current_streak < filters["min_streak"]:
+                        match = False
+                    
+                    if "has_subtasks" in filters:
+                        has_subtasks = len(task.subtasks) > 0
+                        if filters["has_subtasks"] != has_subtasks:
+                            match = False
                 
                 if match:
-                    results.append({
-                        "user_id": user_id,
-                        "username": user_data.get("username"),
-                        "first_name": user_data.get("first_name"),
-                        "tasks_count": len(user_data.get("tasks", {})),
-                        "level": user_data.get("stats", {}).get("level", 1)
-                    })
+                    results.append(task)
             
-            logger.info(f"🔍 Найдено {len(results)} пользователей по запросу '{query}'")
+            logger.info(f"🔍 Найдено {len(results)} задач для пользователя {user_id} по запросу '{query}'")
             return results
             
         except Exception as e:
-            logger.error(f"❌ Ошибка поиска: {e}")
+            logger.error(f"❌ Ошибка поиска задач для пользователя {user_id}: {e}")
             return []
     
-    def filter_users_by_criteria(self, criteria: Dict[str, Any]) -> List[int]:
-        """Фильтрация пользователей по критериям"""
+    async def get_tasks_by_category(self, user_id: int) -> Dict[str, List[Task]]:
+        """Получить задачи сгруппированные по категориям"""
         try:
-            filtered_users = []
+            all_tasks = await self.get_user_tasks(user_id)
             
-            for user_id, user_data in self.users_cache.items():
-                match = True
-                
-                # Фильтр по уровню
-                if "min_level" in criteria:
-                    user_level = user_data.get("stats", {}).get("level", 1)
-                    if user_level < criteria["min_level"]:
-                        match = False
-                
-                if "max_level" in criteria:
-                    user_level = user_data.get("stats", {}).get("level", 1)
-                    if user_level > criteria["max_level"]:
-                        match = False
-                
-                # Фильтр по количеству задач
-                if "min_tasks" in criteria:
-                    tasks_count = len(user_data.get("tasks", {}))
-                    if tasks_count < criteria["min_tasks"]:
-                        match = False
-                
-                # Фильтр по активности
-                if "has_tasks" in criteria and criteria["has_tasks"]:
-                    if not user_data.get("tasks"):
-                        match = False
-                
-                # Фильтр по дате регистрации
-                if "registered_after" in criteria:
-                    reg_date = user_data.get("stats", {}).get("registration_date")
-                    if not reg_date or reg_date < criteria["registered_after"]:
-                        match = False
-                
-                if match:
-                    filtered_users.append(user_id)
+            categories = {}
+            for task in all_tasks:
+                category = task.category
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(task)
             
-            logger.info(f"🔍 Отфильтровано {len(filtered_users)} пользователей")
-            return filtered_users
+            return categories
             
         except Exception as e:
-            logger.error(f"❌ Ошибка фильтрации: {e}")
-            return []
+            logger.error(f"❌ Ошибка группировки задач по категориям для пользователя {user_id}: {e}")
+            return {}
     
-    # ===== ВАЛИДАЦИЯ И ОБСЛУЖИВАНИЕ =====
-    
-    def validate_data_integrity(self) -> Dict[str, Any]:
-        """Проверка целостности данных"""
+    async def get_tasks_by_priority(self, user_id: int) -> Dict[str, List[Task]]:
+        """Получить задачи сгруппированные по приоритету"""
         try:
-            report = {
-                "total_users": len(self.users_cache),
-                "valid_users": 0,
-                "invalid_users": [],
-                "orphaned_data": [],
-                "missing_fields": [],
-                "data_inconsistencies": []
+            all_tasks = await self.get_user_tasks(user_id)
+            
+            priorities = {"high": [], "medium": [], "low": []}
+            for task in all_tasks:
+                priority = task.priority
+                if priority in priorities:
+                    priorities[priority].append(task)
+            
+            return priorities
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка группировки задач по приоритету для пользователя {user_id}: {e}")
+            return {}
+    
+    # ===== СТАТИСТИКА И АНАЛИТИКА =====
+    
+    async def get_user_task_stats(self, user_id: int) -> Dict[str, Any]:
+        """Получить статистику задач пользователя"""
+        try:
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return {}
+            
+            all_tasks = await self.get_user_tasks(user_id)
+            active_tasks = [t for t in all_tasks if t.status == "active"]
+            
+            # Базовая статистика
+            stats = {
+                "total_tasks": len(all_tasks),
+                "active_tasks": len(active_tasks),
+                "completed_today": len([t for t in active_tasks if t.is_completed_today()]),
+                "paused_tasks": len([t for t in all_tasks if t.status == "paused"]),
+                "archived_tasks": len([t for t in all_tasks if t.status == "archived"])
             }
             
-            for user_id, user_data in self.users_cache.items():
-                is_valid = True
-                user_issues = []
+            # Статистика по категориям
+            stats["by_category"] = {}
+            for task in all_tasks:
+                category = task.category
+                if category not in stats["by_category"]:
+                    stats["by_category"][category] = {"total": 0, "active": 0, "completed_today": 0}
                 
-                # Проверяем обязательные поля
-                required_fields = ["user_id", "username", "first_name"]
-                for field in required_fields:
-                    if field not in user_data:
-                        user_issues.append(f"Отсутствует поле {field}")
-                        is_valid = False
+                stats["by_category"][category]["total"] += 1
+                if task.status == "active":
+                    stats["by_category"][category]["active"] += 1
+                    if task.is_completed_today():
+                        stats["by_category"][category]["completed_today"] += 1
+            
+            # Статистика по приоритетам
+            stats["by_priority"] = {}
+            for priority in ["high", "medium", "low"]:
+                priority_tasks = [t for t in active_tasks if t.priority == priority]
+                stats["by_priority"][priority] = {
+                    "total": len(priority_tasks),
+                    "completed_today": len([t for t in priority_tasks if t.is_completed_today()])
+                }
+            
+            # Статистика streak'ов
+            streaks = [task.current_streak for task in active_tasks]
+            if streaks:
+                stats["streaks"] = {
+                    "max": max(streaks),
+                    "average": sum(streaks) / len(streaks),
+                    "total_with_streak": len([s for s in streaks if s > 0])
+                }
+            else:
+                stats["streaks"] = {"max": 0, "average": 0, "total_with_streak": 0}
+            
+            # Процент выполнения
+            if active_tasks:
+                stats["completion_rate_today"] = (stats["completed_today"] / len(active_tasks)) * 100
+            else:
+                stats["completion_rate_today"] = 0
+            
+            # Статистика подзадач
+            total_subtasks = sum(len(task.subtasks) for task in all_tasks)
+            completed_subtasks = sum(task.subtasks_completed_count for task in all_tasks)
+            
+            stats["subtasks"] = {
+                "total": total_subtasks,
+                "completed": completed_subtasks,
+                "completion_rate": (completed_subtasks / total_subtasks * 100) if total_subtasks > 0 else 0
+            }
+            
+            # Тренды за последние дни
+            stats["weekly_trend"] = self._calculate_weekly_trend(all_tasks)
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения статистики задач для пользователя {user_id}: {e}")
+            return {}
+    
+    def _calculate_weekly_trend(self, tasks: List[Task]) -> List[Dict]:
+        """Рассчитать тренд выполнения за неделю"""
+        try:
+            trend = []
+            today = date.today()
+            
+            for i in range(7):
+                check_date = today - timedelta(days=i)
+                check_date_str = check_date.isoformat()
                 
-                # Проверяем соответствие user_id
-                if user_data.get("user_id") != user_id:
-                    user_issues.append("Несоответствие user_id")
-                    is_valid = False
+                completed_count = 0
+                total_active = 0
                 
-                # Проверяем структуру задач
+                for task in tasks:
+                    # Проверяем, была ли задача активна в этот день
+                    created_date = datetime.fromisoformat(task.created_at).date()
+                    if created_date <= check_date:
+                        total_active += 1
+                        
+                        # Проверяем выполнение
+                        for completion in task.completions:
+                            if completion.date == check_date_str and completion.completed:
+                                completed_count += 1
+                                break
+                
+                completion_rate = (completed_count / total_active * 100) if total_active > 0 else 0
+                
+                trend.append({
+                    "date": check_date_str,
+                    "completed": completed_count,
+                    "total_active": total_active,
+                    "completion_rate": completion_rate
+                })
+            
+            return list(reversed(trend))  # От старых к новым
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка расчета тренда: {e}")
+            return []
+    
+    # ===== МАССОВЫЕ ОПЕРАЦИИ =====
+    
+    async def bulk_create_tasks(self, user_id: int, task_titles: List[str], default_category: str = "personal") -> List[str]:
+        """Массовое создание задач"""
+        try:
+            created_task_ids = []
+            
+            for title in task_titles:
+                if title.strip():
+                    task_id = await self.create_task(
+                        user_id=user_id,
+                        title=title.strip(),
+                        category=default_category
+                    )
+                    if task_id:
+                        created_task_ids.append(task_id)
+            
+            logger.info(f"✅ Создано {len(created_task_ids)} задач для пользователя {user_id}")
+            return created_task_ids
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка массового создания задач для пользователя {user_id}: {e}")
+            return []
+    
+    async def bulk_update_tasks(self, user_id: int, updates: Dict[str, Dict]) -> Dict[str, bool]:
+        """Массовое обновление задач"""
+        try:
+            results = {}
+            
+            for task_id, update_data in updates.items():
+                success = await self.update_task(user_id, task_id, **update_data)
+                results[task_id] = success
+            
+            successful_updates = sum(1 for success in results.values() if success)
+            logger.info(f"✅ Обновлено {successful_updates}/{len(updates)} задач для пользователя {user_id}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка массового обновления задач для пользователя {user_id}: {e}")
+            return {}
+    
+    async def reset_user_tasks(self, user_id: int, archive: bool = True) -> bool:
+        """Сброс всех задач пользователя"""
+        try:
+            user_data = self.data_service.get_user_data(user_id)
+            if not user_data:
+                return False
+            
+            if archive:
+                # Архивируем вместо удаления
                 tasks = user_data.get("tasks", {})
-                if tasks and not isinstance(tasks, dict):
-                    user_issues.append("Неверная структура tasks")
-                    is_valid = False
+                for task_data in tasks.values():
+                    task_data["status"] = "archived"
+            else:
+                # Полное удаление
+                user_data["tasks"] = {}
                 
-                # Проверяем статистику
-                stats = user_data.get("stats", {})
-                if stats:
-                    if stats.get("total_tasks", 0) != len(tasks):
-                        user_issues.append("Несоответствие total_tasks и количества задач")
-                        report["data_inconsistencies"].append({
-                            "user_id": user_id,
-                            "issue": "total_tasks mismatch",
-                            "expected": len(tasks),
-                            "actual": stats.get("total_tasks", 0)
-                        })
-                
-                if is_valid:
-                    report["valid_users"] += 1
-                else:
-                    report["invalid_users"].append({
-                        "user_id": user_id,
-                        "issues": user_issues
-                    })
+                # Сбрасываем статистику
+                stats = user_data.setdefault("stats", {})
+                stats["total_tasks"] = 0
+                stats["tasks_completed_today"] = 0
             
-            logger.info(f"✅ Проверка целостности завершена: {report['valid_users']}/{report['total_users']} валидных пользователей")
-            return report
+            # Сохраняем изменения
+            self.data_service.save_user_data(user_id, user_data)
+            
+            action = "архивированы" if archive else "удалены"
+            logger.info(f"🔄 Все задачи пользователя {user_id} {action}")
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Ошибка проверки целостности: {e}")
-            return {"error": str(e)}
+            logger.error(f"❌ Ошибка сброса задач пользователя {user_id}: {e}")
+            return False
     
-    def repair_data_inconsistencies(self) -> Dict[str, int]:
-        """Исправление выявленных несоответствий данных"""
-        try:
-            repairs = {
-                "total_tasks_fixed": 0,
-                "missing_stats_added": 0,
-                "invalid_data_removed": 0
-            }
-            
-            with self.cache_lock:
-                for user_id, user_data in self.users_cache.items():
-                    # Исправляем total_tasks
-                    tasks = user_data.get("tasks", {})
-                    stats = user_data.setdefault("stats", {})
-                    
-                    if stats.get("total_tasks", 0) != len(tasks):
-                        stats["total_tasks"] = len(tasks)
-                        repairs["total_tasks_fixed"] += 1
-                    
-                    # Добавляем отсутствующие поля статистики
-                    default_stats = {
-                        "completed_tasks": 0,
-                        "current_streak": 0,
-                        "longest_streak": 0,
-                        "total_xp": 0,
-                        "level": 1,
-                        "registration_date": datetime.now().isoformat()
-                    }
-                    
-                    for field, default_value in default_stats.items():
-                        if field not in stats:
-                            stats[field] = default_value
-                            repairs["missing_stats_added"] += 1
-                    
-                    self.pending_saves.add(user_id)
-            
-            logger.info(f"🔧 Исправлено несоответствий: {repairs}")
-            return repairs
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка исправления данных: {e}")
-            return {}
+    # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
     
-    def optimize_storage(self) -> Dict[str, Any]:
-        """Оптимизация хранилища данных"""
-        try:
-            result = {
-                "before_size": 0,
-                "after_size": 0,
-                "removed_empty_fields": 0,
-                "compressed_data": 0
-            }
-            
-            # Размер до оптимизации
-            result["before_size"] = len(str(self.users_cache))
-            
-            with self.cache_lock:
-                for user_id, user_data in self.users_cache.items():
-                    modified = False
-                    
-                    # Удаляем пустые поля
-                    def remove_empty_fields(obj):
-                        if isinstance(obj, dict):
-                            return {k: remove_empty_fields(v) for k, v in obj.items() 
-                                   if v is not None and v != "" and v != []}
-                        elif isinstance(obj, list):
-                            return [remove_empty_fields(item) for item in obj if item]
-                        return obj
-                    
-                    cleaned_data = remove_empty_fields(user_data)
-                    if len(str(cleaned_data)) < len(str(user_data)):
-                        self.users_cache[user_id] = cleaned_data
-                        result["removed_empty_fields"] += 1
-                        modified = True
-                    
-                    if modified:
-                        self.pending_saves.add(user_id)
-            
-            # Размер после оптимизации
-            result["after_size"] = len(str(self.users_cache))
-            result["size_reduction"] = result["before_size"] - result["after_size"]
-            
-            logger.info(f"⚡ Оптимизация завершена: {result}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка оптимизации: {e}")
-            return {}
+    def _create_empty_user_data(self, user_id: int) -> Dict:
+        """Создать пустые данные пользователя"""
+        return {
+            "user_id": user_id,
+            "tasks": {},
+            "stats": {
+                "total_tasks": 0,
+                "completed_tasks": 0,
+                "current_streak": 0,
+                "longest_streak": 0,
+                "total_xp": 0,
+                "level": 1,
+                "tasks_completed_today": 0,
+                "daily_xp_earned": 0,
+                "registration_date": datetime.now().isoformat()
+            },
+            "achievements": [],
+            "settings": {}
+        }
     
-    # ===== УТИЛИТЫ И СЕРВИСНЫЕ МЕТОДЫ =====
+    @staticmethod
+    def _update_user_level(stats: Dict):
+        """Обновить уровень пользователя на основе XP"""
+        total_xp = stats.get("total_xp", 0)
+        current_level = stats.get("level", 1)
+        
+        # Формула: level = floor(sqrt(total_xp / 100)) + 1
+        import math
+        new_level = math.floor(math.sqrt(total_xp / 100)) + 1
+        new_level = max(1, new_level)  # Минимум 1 уровень
+        
+        if new_level != current_level:
+            stats["level"] = new_level
+            logger.info(f"🆙 Пользователь повысил уровень: {current_level} → {new_level}")
     
-    def get_storage_info(self) -> Dict[str, Any]:
-        """Информация о хранилище"""
-        try:
-            info = {
-                "data_file": {
-                    "path": str(self.data_file),
-                    "exists": self.data_file.exists(),
-                    "size": self.data_file.stat().st_size if self.data_file.exists() else 0,
-                    "modified": datetime.fromtimestamp(self.data_file.stat().st_mtime).isoformat() if self.data_file.exists() else None
-                },
-                "cache": {
-                    "users_count": len(self.users_cache),
-                    "pending_saves": len(self.pending_saves),
-                    "memory_usage": len(str(self.users_cache))
-                },
-                "backups": {
-                    "directory": str(self.config.BACKUP_DIR),
-                    "count": len(list(self.config.BACKUP_DIR.glob("*.json"))),
-                    "total_size": sum(f.stat().st_size for f in self.config.BACKUP_DIR.glob("*.json"))
-                },
-                "metrics": self.get_service_metrics()
-            }
-            
-            return info
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка получения информации о хранилище: {e}")
-            return {}
+    @staticmethod
+    def get_max_streak_from_user_data(user_data: Dict) -> int:
+        """Получить максимальный streak из данных пользователя"""
+        max_streak = 0
+        tasks = user_data.get("tasks", {})
+        
+        for task_data in tasks.values():
+            if task_data.get("status") == "active":
+                task = Task.from_dict(task_data)
+                if task.current_streak > max_streak:
+                    max_streak = task.current_streak
+        
+        return max_streak
     
-    def health_check(self) -> Dict[str, Any]:
-        """Проверка состояния сервиса"""
-        try:
-            health = {
-                "status": "healthy",
-                "timestamp": datetime.now().isoformat(),
-                "checks": {}
-            }
-            
-            # Проверка доступности файла данных
-            try:
-                health["checks"]["data_file"] = {
-                    "status": "ok" if self.data_file.exists() else "warning",
-                    "message": "Файл данных доступен" if self.data_file.exists() else "Файл данных не найден"
-                }
-            except Exception as e:
-                health["checks"]["data_file"] = {"status": "error", "message": str(e)}
-            
-            # Проверка кэша
-            try:
-                cache_size = len(self.users_cache)
-                health["checks"]["cache"] = {
-                    "status": "ok" if cache_size < self.config.MAX_USERS_CACHE else "warning",
-                    "message": f"Пользователей в кэше: {cache_size}"
-                }
-            except Exception as e:
-                health["checks"]["cache"] = {"status": "error", "message": str(e)}
-            
-            # Проверка операций
-            error_rate = (self.failed_operations / max(self.total_operations, 1)) * 100
-            health["checks"]["operations"] = {
-                "status": "ok" if error_rate < 5 else "warning" if error_rate < 10 else "error",
-                "message": f"Ошибок: {error_rate:.1f}% ({self.failed_operations}/{self.total_operations})"
-            }
-            
-            # Определяем общий статус
-            statuses = [check["status"] for check in health["checks"].values()]
-            if "error" in statuses:
-                health["status"] = "error"
-            elif "warning" in statuses:
-                health["status"] = "warning"
-            
-            return health
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка проверки состояния: {e}")
-            return {
-                "status": "error",
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e)
-            }
+    @staticmethod
+    def check_all_categories_used(user_data: Dict) -> bool:
+        """Проверить использование всех категорий"""
+        tasks = user_data.get("tasks", {})
+        categories_used = set()
+        
+        for task_data in tasks.values():
+            categories_used.add(task_data.get("category", "personal"))
+        
+        all_categories = {"work", "health", "learning", "personal", "finance"}
+        return all_categories.issubset(categories_used)
     
-    def close(self):
-        """Корректное закрытие сервиса"""
-        try:
-            logger.info("🛑 Закрытие DataService...")
+    @staticmethod
+    def check_perfect_week(user_data: Dict) -> bool:
+        """Проверить идеальную неделю"""
+        tasks = user_data.get("tasks", {})
+        if not tasks:
+            return False
+        
+        today = date.today()
+        
+        for i in range(7):
+            check_date = today - timedelta(days=i)
+            check_date_str = check_date.isoformat()
             
-            # Сохраняем все данные
-            if self.pending_saves:
-                logger.info(f"💾 Сохранение {len(self.pending_saves)} отложенных изменений...")
-                self.save_all_to_disk()
+            daily_tasks = []
+            daily_completed = []
             
-            # Сохраняем снимок аналитики
-            self.save_analytics_snapshot()
+            for task_data in tasks.values():
+                if task_data.get("status") == "active":
+                    # Проверяем, была ли задача активна в этот день
+                    created_date = datetime.fromisoformat(task_data.get("created_at", "")).date()
+                    if created_date <= check_date:
+                        daily_tasks.append(task_data)
+                        
+                        # Проверяем выполнение
+                        completions = task_data.get("completions", [])
+                        for completion in completions:
+                            if completion.get("date") == check_date_str and completion.get("completed"):
+                                daily_completed.append(task_data)
+                                break
             
-            # Очищаем кэш
-            with self.cache_lock:
-                self.users_cache.clear()
-                self.pending_saves.clear()
-            
-            logger.info("✅ DataService закрыт корректно")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка закрытия DataService: {e}")
+            # Если в какой-то день не все задачи выполнены
+            if len(daily_completed) != len(daily_tasks) or len(daily_tasks) == 0:
+                return False
+        
+        return True
     
-    def __enter__(self):
-        """Context manager вход"""
-        return self
+    @staticmethod
+    def count_total_subtasks(user_data: Dict) -> int:
+        """Подсчитать общее количество подзадач"""
+        tasks = user_data.get("tasks", {})
+        total_subtasks = 0
+        
+        for task_data in tasks.values():
+            subtasks = task_data.get("subtasks", [])
+            total_subtasks += len(subtasks)
+        
+        return total_subtasks
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager выход"""
-        self.close()
+    @staticmethod
+    def count_unique_tags(user_data: Dict) -> int:
+        """Подсчитать количество уникальных тегов"""
+        tasks = user_data.get("tasks", {})
+        unique_tags = set()
+        
+        for task_data in tasks.values():
+            tags = task_data.get("tags", [])
+            unique_tags.update(tags)
+        
+        return len(unique_tags)
 
 # ===== ГЛОБАЛЬНЫЙ ЭКЗЕМПЛЯР =====
 
 # Создаем глобальный экземпляр для использования в других модулях
-_global_data_service = None
+_global_task_service = None
 
-def get_data_service() -> DataService:
-    """Получить глобальный экземпляр DataService"""
-    global _global_data_service
-    if _global_data_service is None:
-        _global_data_service = DataService()
-    return _global_data_service
+def get_task_service() -> TaskService:
+    """Получить глобальный экземпляр TaskService"""
+    global _global_task_service
+    if _global_task_service is None:
+        _global_task_service = TaskService()
+    return _global_task_service
 
-def initialize_data_service(data_file: str = None) -> DataService:
-    """Инициализация глобального DataService"""
-    global _global_data_service
-    _global_data_service = DataService(data_file)
-    return _global_data_service
-
-def close_data_service():
-    """Закрытие глобального DataService"""
-    global _global_data_service
-    if _global_data_service:
-        _global_data_service.close()
-        _global_data_service = None
+def initialize_task_service(data_service: DataService = None) -> TaskService:
+    """Инициализация глобального TaskService"""
+    global _global_task_service
+    _global_task_service = TaskService(data_service)
+    return _global_task_service
