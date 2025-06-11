@@ -1,37 +1,94 @@
-# FastAPI и веб-фреймворк
+# ============================================================================
+# DailyCheck Bot Dashboard v4.1.0 - Web Dependencies
+# Современные зависимости для веб-дашборда с обновленным дизайном
+# ============================================================================
+
+# Core FastAPI Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+
+# Template Engine
+jinja2==3.1.2
+
+# HTTP Responses
+starlette==0.27.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Data Validation
+pydantic==2.5.0
+
+# JSON Handling
+orjson==3.9.10
+
+# Multipart Form Data
 python-multipart==0.0.6
 
-# Шаблоны и статические файлы
-jinja2==3.1.2
+# Static Files
 aiofiles==23.2.1
 
-# Валидация данных
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# Database Support
+sqlalchemy==2.0.23
+sqlite3  # Built-in Python module
 
-# HTTP клиент для проверок
-httpx==0.25.2
-aiohttp==3.9.1
+# Caching (Optional - with fallbacks)
+diskcache==5.6.3
 
-# Безопасность и CORS
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-
-# Работа с JSON и датами
-orjson==3.9.10
+# Date/Time Utilities
 python-dateutil==2.8.2
 
-# Логирование и мониторинг
-structlog==23.2.0
+# HTTP Client (for API calls)
+httpx==0.25.2
 
-# Дополнительные утилиты
-click==8.1.7
-rich==13.7.0
-sqlalchemy>=2.0.0
-alembic>=1.12.0
-aiosqlite>=0.19.0
-psycopg2-binary>=2.9.0
-diskcache>=5.6.0
-redis>=5.0.0
+# Logging Enhancement
+coloredlogs==15.0.1
+
+# Performance Monitoring
+psutil==5.9.6
+
+# CORS Middleware
+python-cors==1.7.0
+
+# Security
+cryptography==41.0.8
+
+# Async Support
+asyncio-mqtt==0.16.1
+
+# File Utilities
+pathlib2==2.3.7
+
+# Development Dependencies (Optional)
+# Uncomment for development mode
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# black==23.11.0
+# isort==5.12.0
+# flake8==6.1.0
+
+# Optional: Redis Support (if available)
+# redis==5.0.1
+
+# Optional: PostgreSQL Support (if needed)
+# psycopg2-binary==2.9.9
+
+# Optional: Advanced Analytics
+# pandas==2.1.3
+# numpy==1.25.2
+
+# ============================================================================
+# Installation Notes:
+# 
+# Basic installation:
+# pip install -r requirements-web.txt
+#
+# Development installation:
+# pip install -r requirements-web.txt pytest black isort
+#
+# Production with Redis:
+# pip install -r requirements-web.txt redis
+#
+# Production with PostgreSQL:
+# pip install -r requirements-web.txt psycopg2-binary
+# ============================================================================
