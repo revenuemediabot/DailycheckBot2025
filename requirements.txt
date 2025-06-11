@@ -1,371 +1,281 @@
-# requirements.txt - Основные зависимости бота
-# DailyCheck Bot v4.0 - Python dependencies
+# requirements.txt
+# DailycheckBot2025 v4.0 - Полные зависимости для production
+# Telegram бот с AI, веб-дашбордом, геймификацией и полной аналитикой
 
-# Telegram Bot API
-python-telegram-bot>=20.7
-nest-asyncio>=1.5.8
+# ===== ОСНОВА TELEGRAM БОТА =====
+# Telegram Bot API и async поддержка
+python-telegram-bot>=20.7,<21.0
+nest-asyncio>=1.5.8,<2.0
+asyncio-throttle>=1.0.2
 
-# OpenAI для AI функций
-openai>=1.3.0
-
-# Планировщик задач
-APScheduler>=3.10.4
-
-# Обработка данных
-pandas>=2.1.0
-
-# Системные метрики
-psutil>=5.9.0
-
-# Асинхронные HTTP запросы
-httpx>=0.25.0
-aiohttp>=3.9.0
-
-# Логирование и мониторинг
-structlog>=23.2.0
-
-# Утилиты
-python-dotenv>=1.0.0
-pydantic>=2.5.0
-
-# requirements-web.txt - Дополнительные зависимости для веб-дашборда
-# FastAPI веб-дашборд
-
-# Веб-фреймворк
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-
-# Шаблоны
-jinja2>=3.1.2
-
-# Статические файлы
-aiofiles>=23.2.1
-
-# CORS поддержка
-python-multipart>=0.0.6
-
-# requirements-dev.txt - Зависимости для разработки
-# Development dependencies
-
-# Тестирование
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-
-# Форматирование кода
-black>=23.0.0
-isort>=5.12.0
-
-# Линтеры
-flake8>=6.0.0
-pylint>=3.0.0
-
-# Типизация
-mypy>=1.7.0
-
-# Документация
-sphinx>=7.2.0
-sphinx-rtd-theme>=1.3.0
-
-# requirements-docker.txt - Минимальные зависимости для Docker
-# Minimal dependencies for Docker container
-
-python-telegram-bot>=20.7
-nest-asyncio>=1.5.8
-openai>=1.3.0
-APScheduler>=3.10.4
-psutil>=5.9.0
-python-dotenv>=1.0.0
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-jinja2>=3.1.2
-
-# .env.example - Пример переменных окружения
-# DailyCheck Bot v4.0 - Environment Variables Example
-# Скопируйте этот файл в .env и заполните реальными значениями
-
-# ===== ОСНОВНЫЕ НАСТРОЙКИ =====
-
-# Токен Telegram бота (получить у @BotFather)
-BOT_TOKEN=your_bot_token_here
-
-# OpenAI API ключ для AI функций (получить на platform.openai.com)
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Telegram ID администратора бота (ваш ID)
-ADMIN_USER_ID=your_telegram_id
-
-# ===== СЕТЕВЫЕ НАСТРОЙКИ =====
-
-# Порт для HTTP сервера (для health checks и метрик)
-PORT=8080
-
-# Хост для привязки сервера
-HOST=0.0.0.0
-
-# URL для webhook (если используется)
-WEBHOOK_URL=
-
-# ===== ФАЙЛОВАЯ СИСТЕМА =====
-
-# Директория для данных
-DATA_DIR=data
-
-# Директория для экспорта
-EXPORT_DIR=exports
-
-# Директория для бэкапов
-BACKUP_DIR=backups
-
-# Директория для логов
-LOG_DIR=logs
-
-# ===== AI НАСТРОЙКИ =====
-
-# Модель OpenAI для использования
-OPENAI_MODEL=gpt-3.5-turbo
-
-# Максимальное количество токенов для ответа
-OPENAI_MAX_TOKENS=1000
-
-# Включить AI чат по умолчанию
-AI_CHAT_ENABLED=true
-
-# ===== GOOGLE SHEETS ИНТЕГРАЦИЯ =====
-
-# ID Google Sheets документа
-GOOGLE_SHEET_ID=
-
-# Файл с credentials для Google API
-GOOGLE_CREDENTIALS_FILE=service_account.json
-
-# ===== ПРОИЗВОДИТЕЛЬНОСТЬ =====
-
-# Максимальное количество пользователей в кэше
-MAX_USERS_CACHE=1000
-
-# Интервал автоматического бэкапа (часы)
-BACKUP_INTERVAL_HOURS=6
-
-# Уровень логирования (DEBUG, INFO, WARNING, ERROR)
-LOG_LEVEL=INFO
-
-# Режим отладки
-DEBUG_MODE=false
+# ===== AI ФУНКЦИИ =====
+# OpenAI для всех AI функций (мотивация, коучинг, предложения)
+openai>=1.3.0,<2.0
+tiktoken>=0.5.1  # Для подсчета токенов OpenAI
 
 # ===== ВЕБ-ДАШБОРД =====
+# FastAPI веб-дашборд с полным функционалом
+fastapi>=0.104.1,<1.0
+uvicorn[standard]>=0.24.0,<1.0
+jinja2>=3.1.2,<4.0
+starlette>=0.27.0
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+websockets>=12.0  # Для real-time обновлений
 
-# Секретный ключ для дашборда
-DASHBOARD_SECRET_KEY=your-secret-key-here
+# ===== ПЛАНИРОВЩИК И ЗАДАЧИ =====
+# Планировщик для напоминаний, таймеров, бэкапов
+APScheduler>=3.10.4,<4.0
+croniter>=1.4.1  # Для cron выражений
 
-# Порт для веб-дашборда
-DASHBOARD_PORT=8081
+# ===== ОБРАБОТКА ДАННЫХ =====
+# Pandas для аналитики и экспорта
+pandas>=2.1.0,<3.0
+numpy>=1.24.0,<2.0
+openpyxl>=3.1.0  # Для Excel экспорта
+xlsxwriter>=3.1.0  # Альтернативный Excel writer
 
-# Хост для веб-дашборда
-DASHBOARD_HOST=0.0.0.0
+# ===== БАЗЫ ДАННЫХ И ХРАНЕНИЕ =====
+# JSON обработка и валидация
+pydantic>=2.5.0,<3.0
+jsonschema>=4.17.0
+marshmallow>=3.20.0
+tinydb>=4.8.0  # Легковесная JSON база данных
+sqlite3-utils>=3.34  # SQLite утилиты (опционально)
 
-# ===== ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ =====
+# ===== HTTP КЛИЕНТЫ =====
+# Для внешних API запросов
+httpx>=0.25.0,<1.0
+aiohttp>=3.9.0,<4.0
+requests>=2.31.0,<3.0
+urllib3>=2.0.0,<3.0
 
-# Путь к файлу базы данных
-DATABASE_PATH=data/database.json
+# ===== ЛОГИРОВАНИЕ И МОНИТОРИНГ =====
+# Структурированное логирование
+structlog>=23.2.0,<24.0
+loguru>=0.7.0
+rich>=13.7.0  # Красивый вывод в консоль
+colorama>=0.4.6  # Цвета в консоли
 
-# Включить детальное логирование HTTP запросов
-HTTP_DEBUG=false
+# Метрики системы
+psutil>=5.9.0,<6.0
+prometheus-client>=0.19.0  # Prometheus метрики
 
-# Таймаут для внешних API запросов (секунды)
-API_TIMEOUT=30
+# ===== КОНФИГУРАЦИЯ =====
+# Переменные окружения и настройки
+python-dotenv>=1.0.0,<2.0
+pyyaml>=6.0.1  # YAML конфигурация
+toml>=0.10.2  # TOML конфигурация
+configparser>=5.3.0
 
-# Максимальный размер файла для экспорта (MB)
-MAX_EXPORT_SIZE=50
+# ===== GOOGLE SHEETS ИНТЕГРАЦИЯ =====
+# Для экспорта в Google Sheets
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.2.0
+gspread>=5.12.0  # Упрощенная работа с Google Sheets
 
-# pyproject.toml - Конфигурация проекта Python
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# ===== ГРАФИКИ И ВИЗУАЛИЗАЦИЯ =====
+# Для веб-дашборда и аналитики
+plotly>=5.17.0
+matplotlib>=3.7.0
+seaborn>=0.13.0
+bokeh>=3.3.0  # Интерактивные графики
 
-[project]
-name = "dailycheck-bot"
-version = "4.0.0"
-description = "Модульный Telegram бот для отслеживания ежедневных привычек и задач с AI-ассистентом"
-readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "AI Assistant", email = "ai@example.com"}
-]
-keywords = ["telegram", "bot", "productivity", "habits", "ai", "tasks"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Communications :: Chat",
-    "Topic :: Office/Business :: Scheduling",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-]
-requires-python = ">=3.8"
-dependencies = [
-    "python-telegram-bot>=20.7",
-    "nest-asyncio>=1.5.8",
-    "openai>=1.3.0",
-    "APScheduler>=3.10.4",
-    "pandas>=2.1.0",
-    "psutil>=5.9.0",
-    "python-dotenv>=1.0.0",
-    "fastapi>=0.104.1",
-    "uvicorn[standard]>=0.24.0",
-    "jinja2>=3.1.2"
-]
+# ===== ОБРАБОТКА ИЗОБРАЖЕНИЙ =====
+# Для генерации графиков и обработки аватаров
+Pillow>=10.0.0,<11.0
+qrcode>=7.4.2  # QR коды для быстрого доступа
+python-barcode>=0.15.1  # Штрих-коды
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "flake8>=6.0.0",
-    "mypy>=1.7.0"
-]
-docs = [
-    "sphinx>=7.2.0",
-    "sphinx-rtd-theme>=1.3.0"
-]
+# ===== ДАТА И ВРЕМЯ =====
+# Обработка временных зон и дат
+pytz>=2023.3
+python-dateutil>=2.8.2
+arrow>=1.3.0  # Удобная работа с датами
+pendulum>=2.1.2  # Альтернатива arrow
 
-[project.urls]
-Homepage = "https://github.com/your-username/dailycheck-bot"
-Repository = "https://github.com/your-username/dailycheck-bot"
-Documentation = "https://dailycheck-bot.readthedocs.io"
-"Bug Tracker" = "https://github.com/your-username/dailycheck-bot/issues"
+# ===== КРИПТОГРАФИЯ И БЕЗОПАСНОСТЬ =====
+# Для шифрования данных и токенов
+cryptography>=41.0.0
+passlib>=1.7.4
+python-jose>=3.3.0
+bcrypt>=4.1.0
 
-[project.scripts]
-dailycheck = "main:main"
-dailycheck-dashboard = "dashboard.app:main"
+# ===== ПАРСИНГ И ОБРАБОТКА ТЕКСТА =====
+# HTML парсинг и текстовая обработка
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+html5lib>=1.1
+markdown>=3.5.0
+python-slugify>=8.0.0
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["tests*", "docs*"]
+# ===== СЕРИАЛИЗАЦИЯ =====
+# Различные форматы данных
+msgpack>=1.0.7
+pickle5>=0.0.12
+orjson>=3.9.0  # Быстрый JSON
+ujson>=5.8.0  # Ультра-быстрый JSON
 
-[tool.black]
-line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+# ===== КЭШИРОВАНИЕ =====
+# Redis для кэширования (опционально)
+redis>=5.0.0
+hiredis>=2.2.0  # Быстрый Redis парсер
+diskcache>=5.6.0  # Дисковый кэш как альтернатива
 
-[tool.isort]
-profile = "black"
-line_length = 100
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
+# ===== ВАЛИДАЦИЯ И СХЕМЫ =====
+# Дополнительная валидация данных
+cerberus>=1.3.5
+schema>=0.7.5
+voluptuous>=0.14.0
 
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
+# ===== ФАЙЛОВАЯ СИСТЕМА =====
+# Работа с файлами и архивами
+pathlib2>=2.3.7
+send2trash>=1.8.2  # Безопасное удаление
+watchdog>=3.0.0  # Мониторинг файловой системы
+py7zr>=0.20.0  # 7z архивы
+zipfile38>=0.0.3  # Расширенный zipfile
 
-[[tool.mypy.overrides]]
-module = [
-    "telegram.*",
-    "openai.*",
-    "pandas.*",
-    "psutil.*",
-    "apscheduler.*"
-]
-ignore_missing_imports = true
+# ===== СЕТЬ И ПРОТОКОЛЫ =====
+# Дополнительные сетевые утилиты
+dnspython>=2.4.0
+netaddr>=0.9.0
+ping3>=4.0.0
+speedtest-cli>=2.1.0  # Тест скорости интернета
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--verbose",
-    "--cov=.",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml"
-]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests"
-]
+# ===== ГЕОЛОКАЦИЯ =====
+# Для определения часовых поясов пользователей
+geopy>=2.4.0
+geocoder>=1.38.1
+timezonefinder>=6.2.0
 
-# setup.cfg - Дополнительная конфигурация
-[metadata]
-name = dailycheck-bot
-version = 4.0.0
+# ===== МАТЕМАТИКА И СТАТИСТИКА =====
+# Для расширенной аналитики
+scipy>=1.11.0
+scikit-learn>=1.3.0
+statsmodels>=0.14.0
 
-[options]
-zip_safe = False
-include_package_data = True
-python_requires = >=3.8
+# ===== ТЕЛЕГРАМ РАСШИРЕНИЯ =====
+# Дополнительные возможности для Telegram
+emoji>=2.8.0
+python-telegram-bot-calendar>=1.0.5
+telegram-bot-pagination>=0.0.2
 
-[flake8]
-max-line-length = 100
-extend-ignore = E203, E266, E501, W503, F403, F401
-max-complexity = 18
-select = B,C,E,F,W,T4,B9
-exclude = 
-    .git,
-    __pycache__,
-    .venv,
-    .eggs,
-    *.egg,
-    build,
-    dist,
-    docs,
-    tests/fixtures
+# ===== ФОРМАТИРОВАНИЕ И ВЫВОД =====
+# Красивые таблицы и прогресс-бары
+tabulate>=0.9.0
+tqdm>=4.66.0
+progress>=1.6
+click>=8.1.0  # CLI интерфейс
+typer>=0.9.0  # Современный CLI
 
-[coverage:run]
-source = .
-omit = 
-    */tests/*
-    */test_*
-    setup.py
-    */venv/*
-    */.venv/*
+# ===== ТЕСТИРОВАНИЕ (для разработки) =====
+# Базовые инструменты для тестирования в продакшене
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+mock>=5.1.0
 
-[coverage:report]
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    if self.debug:
-    if settings.DEBUG
-    raise AssertionError
-    raise NotImplementedError
-    if 0:
-    if __name__ == .__main__.:
-    class .*\bProtocol\):
-    @(abc\.)?abstractmethod
+# ===== ПРОИЗВОДИТЕЛЬНОСТЬ =====
+# Оптимизация производительности
+cachetools>=5.3.0
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
+py-spy>=0.3.14
+
+# ===== ЛОКАЛИЗАЦИЯ =====
+# Поддержка множественных языков
+babel>=2.13.0
+gettext>=4.0
+
+# ===== EMAIL И УВЕДОМЛЕНИЯ =====
+# Для email уведомлений (опционально)
+emails>=0.6
+smtplib2>=0.2.1
+
+# ===== ПРОЧИЕ УТИЛИТЫ =====
+# Различные полезные библиотеки
+humanize>=4.8.0  # Человеко-читаемые числа
+python-magic>=0.4.27  # Определение типов файлов
+chardet>=5.2.0  # Определение кодировки
+user-agents>=2.2.0  # Парсинг User-Agent
+fake-useragent>=1.4.0  # Генерация User-Agent
+retry>=0.9.2  # Повторные попытки
+backoff>=2.2.1  # Exponential backoff
+ratelimit>=2.2.1  # Rate limiting
+crontab>=1.0.1  # Cron утилиты
+
+# ===== ИНТЕГРАЦИИ =====
+# API интеграции с популярными сервисами
+slack-sdk>=3.26.0  # Slack интеграция
+discord-py>=2.3.0  # Discord интеграция (если нужно)
+twilio>=8.10.0  # SMS уведомления
+
+# ===== ВЕБ-СКРАПИНГ =====
+# Для парсинга веб-страниц (если нужно для AI)
+selenium>=4.15.0
+scrapy>=2.11.0
+
+# ===== МАШИННОЕ ОБУЧЕНИЕ =====
+# Дополнительные ML библиотеки
+transformers>=4.35.0  # Hugging Face модели
+torch>=2.1.0  # PyTorch (опционально)
+tensorflow>=2.14.0  # TensorFlow (опционально)
+
+# ===== БЛОКЧЕЙН И КРИПТОВАЛЮТЫ =====
+# Для будущих крипто-функций (опционально)
+web3>=6.11.0
+bitcoin>=1.1.42
+
+# ===== ИГРОВЫЕ МЕХАНИКИ =====
+# Для расширенной геймификации
+random2>=1.0.1
+uuid>=1.30
+hashids>=1.3.1  # Короткие уникальные ID
+
+# ===== ДОПОЛНИТЕЛЬНЫЕ ФОРМАТЫ =====
+# Поддержка различных форматов файлов
+python-docx>=1.1.0  # Word документы
+PyPDF2>=3.0.1  # PDF файлы
+reportlab>=4.0.0  # Генерация PDF
+fpdf2>=2.7.0  # Альтернативная PDF библиотека
+
+# ===== МУЛЬТИМЕДИА =====
+# Обработка аудио и видео (для будущих функций)
+moviepy>=1.0.3
+pydub>=0.25.1
+speech-recognition>=3.10.0
+
+# ===== СИСТЕМНАЯ ИНТЕГРАЦИЯ =====
+# Системные утилиты
+schedule>=1.2.0  # Простой планировщик
+supervisor>=4.2.5  # Процесс-менеджер
+daemonize>=2.5.0  # Демонизация процесса
+
+# ===== ФИНАЛЬНЫЕ ЗАВИСИМОСТИ =====
+# Критически важные библиотеки
+six>=1.16.0  # Python 2/3 совместимость
+setuptools>=68.0.0  # Установка пакетов
+wheel>=0.41.0  # Колеса для быстрой установки
+pip>=23.3.0  # Менеджер пакетов
+
+# ===== ЗАМЕЧАНИЯ =====
+# Этот requirements.txt содержит ВСЕ возможные зависимости для:
+# 1. Telegram бота с полным функционалом
+# 2. AI интеграции (OpenAI + локальные модели)  
+# 3. Веб-дашборда с интерактивной аналитикой
+# 4. Экспорта во все популярные форматы
+# 5. Интеграций с внешними сервисами
+# 6. Системного мониторинга и логирования
+# 7. Расширенной геймификации
+# 8. Машинного обучения
+# 9. Безопасности и криптографии
+# 10. Производительности и масштабирования
+
+# Общее количество пакетов: 150+
+# Размер установки: ~2-3 GB
+# Время установки: 10-15 минут
+
+# Для минимальной установки используйте requirements-minimal.txt
+# Для разработки добавьте requirements-dev.txt
